@@ -7,7 +7,10 @@ contracts/v1/
 contracts/display-labels/v1.0.0.json
 src/contracts/generated/
 playwright-report/
+playwright-report-visual/
 test-results/
+test-results-visual/
+lighthouse-report/
 public/.htaccess
 docs/operations/
 docs/research/pcpartpicker-*
