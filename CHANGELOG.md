@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Refresh repeated toast announcements and clear expired messages from the accessibility tree.
 - Make summary and shared-build warning paragraphs readable at narrow widths without changing compact severity badges.
 - Show reported subtotal, tax and total in empty complete and partial cost breakdowns; keep totals hidden when coverage is unknown.
 - Show nonzero totals even when an estimate has no priced line items, including tax-only estimates.

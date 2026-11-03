@@ -19,19 +19,44 @@ const ToastContext = createContext<(message: string) => void>(() => {});
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState('');
+  const [announcement, setAnnouncement] = useState('');
   const [visible, setVisible] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reannounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastAnnouncement = useRef('');
   const show = useCallback((next: string) => {
     setMessage(next);
     setVisible(true);
+    if (reannounce.current) clearTimeout(reannounce.current);
+    if (lastAnnouncement.current === next) {
+      // Give the live region a text change even when the same action is repeated.
+      setAnnouncement('');
+      reannounce.current = setTimeout(() => setAnnouncement(next), 100);
+    } else {
+      setAnnouncement(next);
+    }
+    lastAnnouncement.current = next;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setVisible(false), 3100);
+    timer.current = setTimeout(() => {
+      setVisible(false);
+      setAnnouncement('');
+      lastAnnouncement.current = '';
+    }, 3100);
   }, []);
-  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      if (reannounce.current) clearTimeout(reannounce.current);
+    },
+    [],
+  );
   return (
     <ToastContext.Provider value={show}>
       {children}
-      <div aria-live="polite" role="status" className={visible ? 'toast visible' : 'toast'}>
+      <div aria-live="polite" role="status" className="sr-only toast-announcement">
+        {announcement}
+      </div>
+      <div aria-hidden="true" className={visible ? 'toast visible' : 'toast'}>
         {message}
       </div>
     </ToastContext.Provider>

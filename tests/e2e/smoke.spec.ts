@@ -334,7 +334,8 @@ test('share link round-trips into a read-only shared view', async ({ page, conte
     .first()
     .click();
   await page.getByRole('button', { name: 'Copy share link' }).click();
-  await expect(page.getByText(/Share link copied/)).toBeVisible();
+  await expect(page.locator('.toast.visible')).toBeVisible();
+  await expect(page.locator('.toast.visible')).toContainText('Share link copied');
   const url = await page.evaluate(() => navigator.clipboard.readText());
   expect(url).toContain('/shared#b1.');
   await page.goto(url);
@@ -393,7 +394,8 @@ test('incomplete guidance survives choosing, reloading and sharing without blami
   await expect(page.getByTestId('overall-status')).toContainText('2 of 4 required choices made');
   await page.goto('/builder');
   await page.getByRole('button', { name: 'Copy share link' }).click();
-  await expect(page.getByText(/Share link copied/)).toBeVisible();
+  await expect(page.locator('.toast.visible')).toBeVisible();
+  await expect(page.locator('.toast.visible')).toContainText('Share link copied');
   const url = await page.evaluate(() => navigator.clipboard.readText());
   await page.goto(url);
   await expect(page.getByTestId('overall-status')).toContainText('2 of 4 required choices made');

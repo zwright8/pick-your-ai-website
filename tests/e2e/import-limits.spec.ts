@@ -179,7 +179,8 @@ test('a previously saved deep build can be backed up but not shared as an unusab
   await page.waitForTimeout(3300);
   await expect(preview.getByRole('alert')).toBeVisible();
   await preview.getByRole('button', { name: 'Copy JSON' }).click();
-  await expect(page.getByText('Configuration JSON copied')).toBeVisible();
+  await expect(page.locator('.toast.visible')).toBeVisible();
+  await expect(page.locator('.toast.visible')).toHaveText('Configuration JSON copied');
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(JSON.parse(copied).build.name).toBe('Provider-API support chat (demo)');
   await preview.getByRole('button', { name: 'Close dialog' }).click();
@@ -371,7 +372,8 @@ test('a build at the nesting limit can be imported, exported and shared', async 
   if (!path) throw new Error('Missing exported file');
   await expect(page.getByRole('alert').filter({ hasText: 'cannot be re-imported' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Copy share link' }).click();
-  await expect(page.getByText(/Share link copied/)).toBeVisible();
+  await expect(page.locator('.toast.visible')).toBeVisible();
+  await expect(page.locator('.toast.visible')).toContainText('Share link copied');
   const url = await page.evaluate(() => navigator.clipboard.readText());
   await page.goto(url);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(build.name);
