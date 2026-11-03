@@ -18,7 +18,12 @@ import { estimateCost } from '../../domain/cost';
 import { evaluateBuild } from '../../domain/evaluator';
 import { DataError } from '../errors';
 import { hasConsistentCostCurrency } from '../cost-evidence';
-import { matchesBuildEvidence, matchesCostEvidence } from '../evidence-context';
+import {
+  hasConsistentResourceUnits,
+  hasKnownResourceSelections,
+  matchesBuildEvidence,
+  matchesCostEvidence,
+} from '../evidence-context';
 import { LocalBuildRepository } from '../local-builds';
 import {
   ProvenanceEvidenceProvider,
@@ -131,7 +136,12 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
       ruleset,
       resourceEstimate:
         submittedEvidence.resourceEstimate &&
-        matchesBuildEvidence(submitted, submittedEvidence.resourceEstimate)
+        matchesBuildEvidence(submitted, submittedEvidence.resourceEstimate) &&
+        hasConsistentResourceUnits(submittedEvidence.resourceEstimate) &&
+        hasKnownResourceSelections(
+          submittedEvidence.resourceEstimate,
+          new Set(submitted.selections.map((selection) => selection.id)),
+        )
           ? submittedEvidence.resourceEstimate
           : null,
       costEstimate:

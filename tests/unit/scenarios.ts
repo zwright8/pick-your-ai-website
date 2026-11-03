@@ -76,6 +76,10 @@ export function resourceEstimate(
   requiredGb: string,
   confidence: ResourceEstimate['estimates'][number]['confidence'],
 ): ResourceEstimate {
+  const selectionIds = ['sel_model', 'sel_accelerator'].filter((id) =>
+    build.selections.some((selection) => selection.id === id),
+  );
+  if (!selectionIds.length) throw new Error('Resource fixture requires a model or accelerator');
   return {
     schema_version: '1.0.0',
     id: `resources.test.r${build.revision}`,
@@ -91,7 +95,7 @@ export function resourceEstimate(
         estimator_version: '0.0-test',
         confidence,
         assumptions: ['Synthetic test value.'],
-        selection_ids: ['sel_model', 'sel_accelerator'],
+        selection_ids: [...selectionIds],
       },
       {
         metric: 'inference.estimated_peak_per_device_vram_gb',
@@ -101,7 +105,7 @@ export function resourceEstimate(
         estimator_version: '0.0-test',
         confidence,
         assumptions: ['Synthetic test value.'],
-        selection_ids: ['sel_model', 'sel_accelerator'],
+        selection_ids: [...selectionIds],
       },
     ],
   };

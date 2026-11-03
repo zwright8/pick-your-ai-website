@@ -6,6 +6,8 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { BuildSnapshot, CatalogItem, ComponentKind } from '../contracts';
+import { hasConsistentResourceUnits, hasKnownResourceSelections } from '../data/evidence-context';
+import { DataError } from '../data/errors';
 import { useData } from './data-context';
 
 export function useCatalog() {
@@ -65,7 +67,33 @@ export function useBuildAnalysis(build: BuildSnapshot | null | undefined) {
   });
   const resources = useQuery({
     queryKey: ['resources', ...buildKey(build)],
-    queryFn: () => data.resources.estimate(build!),
+    queryFn: async () => {
+      if (!build) throw new DataError('not_found', 'No build is available.');
+      const { id, revision } = build;
+      const selectionIds = new Set(build.selections.map((selection) => selection.id));
+      const result = await data.resources.estimate(build);
+      if (result.status === 'available') {
+        if (result.estimate.build_id !== id || result.estimate.build_revision !== revision)
+          throw new DataError('malformed', 'Resource evidence does not match the build revision.', {
+            contract: 'ResourceEstimate',
+          });
+        if (!hasConsistentResourceUnits(result.estimate))
+          throw new DataError(
+            'malformed',
+            'Resource evidence contains incompatible metric units.',
+            {
+              contract: 'ResourceEstimate',
+            },
+          );
+        if (!hasKnownResourceSelections(result.estimate, selectionIds))
+          throw new DataError(
+            'malformed',
+            'Resource evidence references selections outside this build.',
+            { contract: 'ResourceEstimate' },
+          );
+      }
+      return result;
+    },
     enabled,
     placeholderData: keepPreviousData,
     retry: 1,

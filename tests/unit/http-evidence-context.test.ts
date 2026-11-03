@@ -5,7 +5,7 @@ import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import type { FetchLike } from '../../src/data/http/client';
 import { createHttpProviders } from '../../src/data/http/providers';
 import { updateObjectives } from '../../src/domain/build';
-import { CATALOG, NOW, apiChat, buildWith, resourceEstimate } from './scenarios';
+import { CATALOG, NOW, apiChat, buildWith, resourceEstimate, selfHosted } from './scenarios';
 
 const fixture = createFixtureProviders({ now: () => NOW });
 const json = (value: unknown) =>
@@ -29,6 +29,76 @@ function pinnedBuild() {
 }
 
 describe('HTTP evaluation response context', () => {
+  it.each([
+    ['a nonexistent selection', ['sel_nonexistent']],
+    ['no selections', []],
+  ] as const)('does not send resource evidence tied to %s', async (_label, selectionIds) => {
+    const build = selfHosted();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    resource.estimates = resource.estimates.map((entry) => ({
+      ...entry,
+      selection_ids: [...selectionIds],
+    }));
+    if (selectionIds.length) assertContract('ResourceEstimate', resource);
+    const api = responseApi(await fixture.compatibility.evaluate(build));
+    await expect(
+      providers(api).compatibility.evaluate(build, { resourceEstimate: resource }),
+    ).rejects.toMatchObject({ kind: 'malformed', contract: 'ResourceEstimate' });
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it('does not send an empty resource document', async () => {
+    const build = selfHosted();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    resource.estimates = [];
+    const api = responseApi(await fixture.compatibility.evaluate(build));
+    await expect(
+      providers(api).compatibility.evaluate(build, { resourceEstimate: resource }),
+    ).rejects.toMatchObject({ kind: 'malformed', contract: 'ResourceEstimate' });
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it('accepts resource metrics paired with their corresponding units', async () => {
+    const build = pinnedBuild();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    const first = resource.estimates[0];
+    if (!first) throw new Error('Missing resource fixture');
+    resource.estimates = [
+      { ...first, metric: 'inference.estimated_required_vram_gb', unit: 'gb' },
+      { ...first, metric: 'inference.estimated_peak_per_device_vram_gb', unit: 'gb' },
+      { ...first, metric: 'inference.estimated_tokens_per_second', unit: 'tokens_per_second' },
+      { ...first, metric: 'compute.estimated_gpu_power_w', unit: 'watt' },
+      { ...first, metric: 'training.estimated_gpu_hours', unit: 'gpu_hour' },
+    ];
+    assertContract('ResourceEstimate', resource);
+    const report = await fixture.compatibility.evaluate(build);
+    const api = responseApi(report);
+    await expect(
+      providers(api).compatibility.evaluate(build, { resourceEstimate: resource }),
+    ).resolves.toEqual(report);
+    expect(api).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['inference.estimated_required_vram_gb', 'watt'],
+    ['inference.estimated_peak_per_device_vram_gb', 'watt'],
+    ['inference.estimated_tokens_per_second', 'gb'],
+    ['compute.estimated_gpu_power_w', 'gpu_hour'],
+    ['training.estimated_gpu_hours', 'watt'],
+  ] as const)('does not send %s evidence in the wrong unit', async (metric, unit) => {
+    const build = pinnedBuild();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    const first = resource.estimates[0];
+    if (!first) throw new Error('Missing resource fixture');
+    resource.estimates = [{ ...first, metric, unit }];
+    assertContract('ResourceEstimate', resource);
+    const api = responseApi(await fixture.compatibility.evaluate(build));
+    await expect(
+      providers(api).compatibility.evaluate(build, { resourceEstimate: resource }),
+    ).rejects.toMatchObject({ kind: 'malformed', contract: 'ResourceEstimate' });
+    expect(api).not.toHaveBeenCalled();
+  });
+
   it.each(['build_id', 'build_revision', 'pricebook_id'] as const)(
     'does not send cost evidence with a foreign %s',
     async (field) => {
@@ -219,6 +289,45 @@ it('does not use inconsistent currency evidence for the local budget rule', asyn
     invalid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
   ).toBe('unknown');
 });
+
+it.each([
+  ['inference.estimated_required_vram_gb', 'rule.vram.estimate.fit'],
+  ['inference.estimated_peak_per_device_vram_gb', 'rule.vram.per.device.fit'],
+] as const)(
+  'does not use %s with an incompatible unit for local compatibility',
+  async (metric, ruleId) => {
+    const build = selfHosted();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    const valid = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+    expect(valid.findings.find((finding) => finding.rule_id === ruleId)?.outcome).toBe('pass');
+    resource.estimates = resource.estimates.map((entry) =>
+      entry.metric === metric ? { ...entry, unit: 'watt' as const } : entry,
+    );
+    assertContract('ResourceEstimate', resource);
+    const invalid = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+    expect(invalid.findings.find((finding) => finding.rule_id === ruleId)?.outcome).toBe('unknown');
+  },
+);
+
+it.each([
+  ['a nonexistent selection', ['sel_nonexistent']],
+  ['no selections', []],
+] as const)(
+  'does not use resource evidence tied to %s for local compatibility',
+  async (_label, selectionIds) => {
+    const build = selfHosted();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    resource.estimates = resource.estimates.map((entry) => ({
+      ...entry,
+      selection_ids: [...selectionIds],
+    }));
+    if (selectionIds.length) assertContract('ResourceEstimate', resource);
+    const report = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+    expect(
+      report.findings.find((finding) => finding.rule_id === 'rule.vram.estimate.fit')?.outcome,
+    ).toBe('unknown');
+  },
+);
 
 it('does not use a foreign pricebook estimate for the local budget rule', async () => {
   const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {

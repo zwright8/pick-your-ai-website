@@ -16,7 +16,12 @@ import type { BuildSnapshot, CatalogSnapshot, ComponentKind, ContractName } from
 import { BASELINE_GRAPH, BASELINE_RULESET } from '../../contracts';
 import { DataError, isDataError } from '../errors';
 import { hasConsistentCostCurrency } from '../cost-evidence';
-import { matchesBuildEvidence, matchesCostEvidence } from '../evidence-context';
+import {
+  hasConsistentResourceUnits,
+  hasKnownResourceSelections,
+  matchesBuildEvidence,
+  matchesCostEvidence,
+} from '../evidence-context';
 import { LocalBuildRepository } from '../local-builds';
 import { ProvenanceEvidenceProvider } from '../shared';
 import type {
@@ -146,6 +151,26 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
       throw new DataError('malformed', 'Resource evidence does not match the build revision.', {
         contract: 'ResourceEstimate',
       });
+    }
+    if (evidence.resourceEstimate && !hasConsistentResourceUnits(evidence.resourceEstimate)) {
+      throw new DataError('malformed', 'Resource evidence contains incompatible metric units.', {
+        contract: 'ResourceEstimate',
+      });
+    }
+    if (
+      evidence.resourceEstimate &&
+      !hasKnownResourceSelections(
+        evidence.resourceEstimate,
+        new Set(build.selections.map((selection) => selection.id)),
+      )
+    ) {
+      throw new DataError(
+        'malformed',
+        'Resource evidence references selections outside this build.',
+        {
+          contract: 'ResourceEstimate',
+        },
+      );
     }
     if (evidence.costEstimate && !hasConsistentCostCurrency(evidence.costEstimate)) {
       throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {

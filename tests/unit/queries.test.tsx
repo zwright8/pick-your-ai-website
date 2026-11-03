@@ -1,5 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -130,6 +138,72 @@ describe('build analysis identity', () => {
         resourceEstimate: null,
       }),
     );
+    h.unmount();
+  });
+
+  it.each([
+    'wrong unit',
+    'wrong build',
+    'wrong revision',
+    'wrong selection',
+    'empty selections',
+    'empty metrics',
+    'provider error',
+  ] as const)('reports %s capacity evidence as unavailable', async (problem) => {
+    const h = await analysisHarness();
+    if (h.resources.status !== 'available') throw new Error('Expected resource fixture');
+    const invalid = structuredClone(h.resources.estimate);
+    const first = invalid.estimates[0];
+    if (!first) throw new Error('Missing resource metric');
+    if (problem === 'wrong unit') first.unit = 'watt';
+    if (problem === 'wrong build') invalid.build_id = 'build.foreign';
+    if (problem === 'wrong revision') invalid.build_revision += 1;
+    if (problem === 'wrong selection') first.selection_ids = ['sel_nonexistent'];
+    if (problem === 'empty selections') first.selection_ids = [];
+    if (problem === 'empty metrics') invalid.estimates = [];
+    if (problem === 'provider error')
+      h.estimateResources.mockRejectedValue(new Error('Unavailable'));
+    else h.estimateResources.mockResolvedValue({ status: 'available', estimate: invalid });
+    await act(async () => {
+      await h.result.current.resourcesQuery.refetch();
+    });
+    await waitFor(() => expect(h.result.current.resourceError).toBe(true));
+    expect(h.result.current.resources).toBeUndefined();
+    await waitFor(() =>
+      expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+        costEstimate: h.cost,
+        resourceEstimate: null,
+      }),
+    );
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: createDraft(h.build),
+      ready: true,
+      catalogById: BY_ID,
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const view = render(<BuildSummaryPage />, { wrapper: h.wrapper });
+    const capacity = await screen.findByRole('region', { name: 'Capacity evidence' });
+    await waitFor(() => expect(capacity).toHaveTextContent('Capacity evidence unavailable'));
+    expect(capacity).not.toHaveTextContent('Checking capacity evidence');
+    expect(capacity).not.toHaveTextContent('8 watt');
+    if (problem === 'wrong unit') {
+      h.estimateResources.mockResolvedValue(h.resources);
+      h.evaluate.mockClear();
+      fireEvent.click(within(capacity).getByRole('button', { name: 'Try again' }));
+      await waitFor(() => expect(capacity).toHaveTextContent('8 gb'));
+      await waitFor(() =>
+        expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+          costEstimate: h.cost,
+          resourceEstimate: h.resources.status === 'available' ? h.resources.estimate : null,
+        }),
+      );
+    }
+    view.unmount();
     h.unmount();
   });
 

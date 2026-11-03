@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Reject resource evidence with mismatched metric units or unknown selection IDs, and show capacity-evidence errors with a retry action.
 - Bind local pricing and compatibility to the build’s pinned artifacts, and reject foreign evaluation evidence before HTTP requests.
 - Withhold candidate verdicts from a different displayed snapshot, and avoid presenting unavailable requirement or check counts as zero.
 - Refresh Linux builder visual baselines for the mode-dependent requirement label and the earlier light-theme status contrast fix.
