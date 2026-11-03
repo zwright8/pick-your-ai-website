@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Bind local pricing and compatibility to the build’s pinned artifacts, and reject foreign evaluation evidence before HTTP requests.
+- Withhold candidate verdicts from a different displayed snapshot, and avoid presenting unavailable requirement or check counts as zero.
+- Refresh Linux builder visual baselines for the mode-dependent requirement label and the earlier light-theme status contrast fix.
 - Keep export failures visible in the builder and summary, and clean up temporary download links if the browser rejects an export.
 - Keep share failures visible until dismissed or a retry succeeds, and preserve feedback when clipboard attempts overlap.
 - Refresh repeated toast announcements and clear expired messages from the accessibility tree.

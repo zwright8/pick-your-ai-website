@@ -148,7 +148,16 @@ export function PartList({
   });
   const byId = catalog.byId;
 
-  const ctx = useMemo(() => (build ? buildContext(build, byId) : undefined), [build, byId]);
+  const ctx = useMemo(
+    () =>
+      build
+        ? buildContext(
+            build,
+            catalog.data?.id === build.locks.catalog_snapshot_id ? byId : new Map(),
+          )
+        : undefined,
+    [build, byId, catalog.data?.id],
+  );
   const cov = useMemo(() => (build && ctx ? coverage(build, ctx) : undefined), [build, ctx]);
 
   /*
@@ -215,6 +224,11 @@ export function PartList({
       </>
     );
 
+  const requirementsKnown =
+    catalog.data.id === build.locks.catalog_snapshot_id &&
+    ruleset.data?.id === build.locks.ruleset_id &&
+    ruleset.data.version === build.locks.ruleset_version;
+
   // ---- rows --------------------------------------------------------------------------------
   const pool = catalog.data.items.filter((i) =>
     mode === 'kind' && kind ? i.kind === kind : layer ? kindDef(i.kind).tier === layer : true,
@@ -222,12 +236,16 @@ export function PartList({
 
   const rows: Row[] = pool.map((item) => ({
     item,
-    verdict: verdictFor(compat.data, item.kind, item.id, item.version),
+    verdict:
+      catalog.data.id === build.locks.catalog_snapshot_id
+        ? verdictFor(compat.data, item.kind, item.id, item.version)
+        : 'unknown',
     price: itemPrice(
       item,
       build,
       byId,
       pricebook.data,
+      catalog.data.id,
       replaceTarget
         ? selectionMatchesItem(replaceTarget, item)
           ? replaceTarget
@@ -385,7 +403,7 @@ export function PartList({
   const layerOfRow = (tier: Tier) => layerOf(tier);
   const single = singleKind;
 
-  const requiredFor = (k: ComponentKind) => kindNeed(k, ctx.mode) === 'needed';
+  const requiredFor = (k: ComponentKind) => requirementsKnown && kindNeed(k, ctx.mode) === 'needed';
 
   return (
     <>
@@ -438,10 +456,11 @@ export function PartList({
           <MiniBuild
             dataMode={dataMode}
             selected={build.selections.filter((s) => s.enabled).length}
-            required={{
-              done: cov.needed.length - cov.missing.length,
-              total: cov.needed.length,
-            }}
+            required={
+              requirementsKnown
+                ? { done: cov.needed.length - cov.missing.length, total: cov.needed.length }
+                : undefined
+            }
             outcome={
               report?.summary.failed
                 ? 'fail'
@@ -452,8 +471,8 @@ export function PartList({
                     : 'none'
             }
             cost={analysis.costIsCurrent ? analysis.cost : undefined}
-            conflicts={report?.summary.failed ?? 0}
-            unknown={report?.summary.unknown ?? 0}
+            conflicts={report?.summary.failed}
+            unknown={report?.summary.unknown}
             incomplete={incompleteBuild(build, report, ruleset.data) ?? undefined}
           />
 

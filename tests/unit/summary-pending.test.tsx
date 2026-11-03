@@ -156,13 +156,31 @@ describe.each(['summary', 'shared'] as const)('%s evaluation presentation', (pag
     );
     const panel = await screen.findByTestId('overall-status');
     await waitFor(() => expect(providers.compatibility.evaluate).toHaveBeenCalled());
-    if (state === 'unavailable') await screen.findByText('Evaluation unavailable');
+    if (state === 'unavailable') await screen.findAllByText('Evaluation unavailable');
     expect(panel).toHaveClass('neutral');
     expect(panel).not.toHaveClass('warning', 'danger');
     expect(panel.querySelector('use')).toHaveAttribute('href', '#i-info');
     expect(panel).toHaveTextContent(
-      page === 'summary' ? 'Not evaluated yet' : 'Evaluating this build',
+      page === 'summary'
+        ? 'Not evaluated yet'
+        : state === 'unavailable'
+          ? 'Evaluation unavailable'
+          : 'Evaluating this build',
     );
+    if (page === 'summary') {
+      expect(panel).toHaveTextContent(
+        state === 'unavailable'
+          ? 'The published rules could not be evaluated. Use the retry action below.'
+          : 'The published rules are being evaluated for this revision.',
+      );
+    }
+    const findings = screen.getByRole('region', { name: 'Findings' });
+    if (state === 'unavailable') {
+      expect(findings).toHaveTextContent('Evaluation unavailable');
+      expect(findings).not.toHaveTextContent('Evaluating');
+    } else {
+      expect(findings).toHaveTextContent('Evaluating');
+    }
     view.unmount();
     client.clear();
   });

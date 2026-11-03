@@ -328,7 +328,7 @@ function ComponentCompare() {
        * support-chat price ≥ $14.40, not $14.40.
        */
       render: (item) => {
-        const price = itemPrice(item, draft?.build, catalog.byId, pricebook.data);
+        const price = itemPrice(item, draft?.build, catalog.byId, pricebook.data, catalog.data?.id);
         if (price.amount === null)
           return (
             <span className="pchip pchip-unknown" title={price.note}>
@@ -354,7 +354,7 @@ function ComponentCompare() {
         );
       },
       compare: (item) => {
-        const price = itemPrice(item, draft?.build, catalog.byId, pricebook.data);
+        const price = itemPrice(item, draft?.build, catalog.byId, pricebook.data, catalog.data?.id);
         if (price.amount === null) return 'unknown';
         // A lower bound and a complete price of the same amount are not the same fact.
         return price.partial ? `${price.amount} (lower bound)` : price.amount;
@@ -723,8 +723,11 @@ function ComponentCompare() {
 
 function FitCell({ item }: { item: CatalogItem }) {
   const { draft } = useBuilder();
+  const catalog = useCatalog();
   const options = useCompatibleOptions(draft?.build ?? null, item.kind);
   if (!draft) return <span className="cmp-empty">No build to check</span>;
+  if (catalog.data?.id !== draft.build.locks.catalog_snapshot_id)
+    return <CompatChip verdict="unknown" />;
   if (options.isError) return <span className="pchip pchip-unknown">Could not check</span>;
   if (!options.data || options.isPlaceholderData)
     return <span className="cmp-empty">Checking…</span>;

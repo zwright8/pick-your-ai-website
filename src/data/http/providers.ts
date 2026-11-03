@@ -16,6 +16,7 @@ import type { BuildSnapshot, CatalogSnapshot, ComponentKind, ContractName } from
 import { BASELINE_GRAPH, BASELINE_RULESET } from '../../contracts';
 import { DataError, isDataError } from '../errors';
 import { hasConsistentCostCurrency } from '../cost-evidence';
+import { matchesBuildEvidence, matchesCostEvidence } from '../evidence-context';
 import { LocalBuildRepository } from '../local-builds';
 import { ProvenanceEvidenceProvider } from '../shared';
 import type {
@@ -132,6 +133,20 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
     this.client = client;
   }
   async evaluate(build: BuildSnapshot, evidence: EvaluationEvidence = {}) {
+    if (evidence.costEstimate && !matchesCostEvidence(build, evidence.costEstimate)) {
+      throw new DataError(
+        'malformed',
+        'Cost evidence does not match the build revision or pricebook.',
+        {
+          contract: 'CostEstimate',
+        },
+      );
+    }
+    if (evidence.resourceEstimate && !matchesBuildEvidence(build, evidence.resourceEstimate)) {
+      throw new DataError('malformed', 'Resource evidence does not match the build revision.', {
+        contract: 'ResourceEstimate',
+      });
+    }
     if (evidence.costEstimate && !hasConsistentCostCurrency(evidence.costEstimate)) {
       throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
         contract: 'CostEstimate',

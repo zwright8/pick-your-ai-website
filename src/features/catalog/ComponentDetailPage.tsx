@@ -75,13 +75,16 @@ export default function ComponentDetailPage() {
   const logo = itemLogo(item);
   const spec = item.spec as Record<string, unknown>;
   const fields = specFields(item.kind);
-  const price = itemPrice(item, build, catalog.byId, pricebook.data);
+  const price = itemPrice(item, build, catalog.byId, pricebook.data, catalog.data?.id);
   const freshness = itemFreshness(item);
   const verification = strongestVerification(item);
   const inStack = Boolean(build?.selections.some((s) => selectionMatchesItem(s, item)));
 
   const verdict =
-    options.isError || options.isPlaceholderData
+    !build ||
+    catalog.data?.id !== build.locks.catalog_snapshot_id ||
+    options.isError ||
+    options.isPlaceholderData
       ? undefined
       : uniqueOptionFor(options.data, item.id, item.version);
   const conflicts = verdict?.verdict === 'incompatible' ? Math.max(verdict.rule_ids.length, 1) : 0;

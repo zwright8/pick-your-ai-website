@@ -29,6 +29,39 @@ function pinnedBuild() {
 }
 
 describe('HTTP evaluation response context', () => {
+  it.each(['build_id', 'build_revision', 'pricebook_id'] as const)(
+    'does not send cost evidence with a foreign %s',
+    async (field) => {
+      const build = pinnedBuild();
+      const cost = await fixture.pricing.estimate(build);
+      const foreign = assertContract('CostEstimate', {
+        ...cost,
+        [field]: field === 'build_revision' ? build.revision + 1 : 'foreign.artifact',
+      });
+      const api = responseApi(await fixture.compatibility.evaluate(build));
+      await expect(
+        providers(api).compatibility.evaluate(build, { costEstimate: foreign }),
+      ).rejects.toMatchObject({ kind: 'malformed', contract: 'CostEstimate' });
+      expect(api).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['build_id', 'build_revision'] as const)(
+    'does not send resource evidence with a foreign %s',
+    async (field) => {
+      const build = pinnedBuild();
+      const foreign = assertContract('ResourceEstimate', {
+        ...resourceEstimate(build, '24', 'calibrated'),
+        [field]: field === 'build_revision' ? build.revision + 1 : 'foreign.artifact',
+      });
+      const api = responseApi(await fixture.compatibility.evaluate(build));
+      await expect(
+        providers(api).compatibility.evaluate(build, { resourceEstimate: foreign }),
+      ).rejects.toMatchObject({ kind: 'malformed', contract: 'ResourceEstimate' });
+      expect(api).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects inconsistent cost evidence before sending it for evaluation', async () => {
     const build = pinnedBuild();
     const cost = await fixture.pricing.estimate(build);
@@ -182,6 +215,23 @@ it('does not use inconsistent currency evidence for the local budget rule', asyn
   ).toBe('pass');
   cost.total.currency = 'EUR';
   const invalid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    invalid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('unknown');
+});
+
+it('does not use a foreign pricebook estimate for the local budget rule', async () => {
+  const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
+    monthly_budget_amount: '10000.00',
+  });
+  build.locks.pricebook_id = DEMO_PRICEBOOK.id;
+  const cost = await fixture.pricing.estimate(build);
+  const valid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    valid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('pass');
+  const foreign = assertContract('CostEstimate', { ...cost, pricebook_id: 'pricebook.foreign' });
+  const invalid = await fixture.compatibility.evaluate(build, { costEstimate: foreign });
   expect(
     invalid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
   ).toBe('unknown');

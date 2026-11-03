@@ -58,6 +58,8 @@ Candidate verdicts are displayed only when exactly one response matches the cata
 
 For local evaluation, the provider projects out catalog records whose IDs are referenced by enabled selections pinned to another kind or version. This prevents reference-interpreter metrics that look up an item by ID alone from using another version's facts; the interpreter and published rules remain unchanged. If multiple selections share an ID with different pins, the record is withheld conservatively for all of them. The HTTP service needs its own equivalent evidence admission; it has not been verified here.
 
+Local pricing and compatibility request the build's pinned catalog snapshot, and local compatibility also requires the loaded ruleset and graph to match the build's locks. An unavailable artifact produces an unavailable result; it does not invalidate the build. Candidate prices and compatibility labels from the displayed catalog are withheld when its snapshot differs from the build lock. The HTTP evaluator rejects supplied cost or capacity evidence for a different build revision, and rejects cost evidence that conflicts with an explicit pricebook lock. These client checks do not establish how the HTTP service validates evidence internally.
+
 ## State management
 
 - **Server/data state** lives in TanStack Query. Catalog, graph, ruleset and pricebook use `staleTime: Infinity` because they are immutable. Build-derived queries include the snapshot content as well as its ID and revision.

@@ -84,7 +84,7 @@ describe('catalog stack summary', () => {
     apiFor(next);
     view.rerender(tree());
 
-    await waitFor(() => expect(conflicts()).toHaveTextContent('Conflicts0'));
+    await waitFor(() => expect(conflicts()).toHaveTextContent('ConflictsNot evaluated'));
     expect(screen.getByTestId('overall-status')).toHaveTextContent('Not evaluated yet.');
     expect(screen.getByTestId('overall-status')).not.toHaveTextContent('Failing checks');
     expect(screen.getByTestId('overall-status')).not.toHaveTextContent('No published rule fails');

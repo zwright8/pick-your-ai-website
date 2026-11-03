@@ -272,7 +272,9 @@ function SharedPreview({
             }
           />
           {!report
-            ? 'Evaluating this build…'
+            ? analysis.evaluation.isError
+              ? 'Evaluation unavailable'
+              : 'Evaluating this build…'
             : incomplete
               ? `Incomplete — ${incomplete.chosen} of ${incomplete.total} required choices made`
               : outcome === 'fail'
@@ -283,7 +285,9 @@ function SharedPreview({
         </div>
         <p>
           {!report
-            ? 'The published rules are being evaluated against this site’s catalog.'
+            ? analysis.evaluation.isError
+              ? 'The published rules could not be evaluated. Use the retry action below.'
+              : 'The published rules are being evaluated against this site’s catalog.'
             : incomplete
               ? `${incomplete.remediation} Provisional inference from presence rules; the contract findings below are unchanged.`
               : outcome === 'fail'
@@ -399,7 +403,11 @@ function SharedPreview({
       <section className="panel" aria-labelledby="shared-findings-heading">
         <h2 id="shared-findings-heading">Findings</h2>
         {!report ? (
-          <Loading label="Evaluating the shared build…" />
+          analysis.evaluation.isError ? (
+            <p>Evaluation unavailable for this build.</p>
+          ) : (
+            <Loading label="Evaluating the shared build…" />
+          )
         ) : (
           <div className="issue-list">
             {flagged.length === 0 ? (

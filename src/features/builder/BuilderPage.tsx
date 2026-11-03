@@ -65,11 +65,13 @@ function GroupRow({
   tier,
   ctx,
   build,
+  requirementsKnown,
   onAdd,
 }: {
   tier: Tier;
   ctx: BuildContext;
   build: BuildSnapshot;
+  requirementsKnown: boolean;
   onAdd: () => void;
 }) {
   const layer = layerOf(tier);
@@ -78,15 +80,20 @@ function GroupRow({
   const done = required.filter((k) =>
     build.selections.some((s) => s.enabled && s.kind === k),
   ).length;
-  const optional = kinds.filter((k) => kindNeed(k, ctx.mode) !== 'needed');
+  const modeDependent = kinds.some((k) => kindNeed(k, ctx.mode) === 'depends_on_mode');
+  const optional = kinds.filter((k) => kindNeed(k, ctx.mode) === 'optional');
   const optionalDone = optional.filter((k) =>
     build.selections.some((s) => s.enabled && s.kind === k),
   ).length;
-  const status = required.length
-    ? `Required ${done}/${required.length}`
-    : optional.length
-      ? `Optional ${optionalDone}/${optional.length}`
-      : KIND_NEED_LABEL.not_needed;
+  const status = !requirementsKnown
+    ? 'Requirements not evaluated'
+    : modeDependent
+      ? 'Depends on deployment mode'
+      : required.length
+        ? `Required ${done}/${required.length}`
+        : optional.length
+          ? `Optional ${optionalDone}/${optional.length}`
+          : KIND_NEED_LABEL.not_needed;
   const anySelected = kinds.some((k) => build.selections.some((s) => s.enabled && s.kind === k));
   return (
     <tr className="pt-group">
@@ -421,7 +428,16 @@ export default function BuilderPage() {
   }, [unappliedChanges]);
 
   const byId = catalog.byId;
-  const ctx = useMemo(() => (build ? buildContext(build, byId) : undefined), [build, byId]);
+  const ctx = useMemo(
+    () =>
+      build
+        ? buildContext(
+            build,
+            catalog.data?.id === build.locks.catalog_snapshot_id ? byId : new Map(),
+          )
+        : undefined,
+    [build, byId, catalog.data?.id],
+  );
   const cov = useMemo(() => (build && ctx ? coverage(build, ctx) : undefined), [build, ctx]);
 
   const jsonPreview = useMemo(() => {
@@ -448,6 +464,10 @@ export default function BuilderPage() {
   if (!ready || !build || !catalog.data || !ctx || !cov) return <BuilderLoading />;
 
   const report = analysis.reportIsCurrent ? analysis.report : undefined;
+  const requirementsKnown =
+    catalog.data.id === build.locks.catalog_snapshot_id &&
+    ruleset.data?.id === build.locks.ruleset_id &&
+    ruleset.data.version === build.locks.ruleset_version;
   const failed = report?.summary.failed ?? 0;
   const unknown = report?.summary.unknown ?? 0;
   const flagged = flaggedFindings(report);
@@ -468,7 +488,7 @@ export default function BuilderPage() {
       : unknown
         ? 'unknown'
         : report
-          ? cov.missing.length
+          ? requirementsKnown && cov.missing.length
             ? 'unknown'
             : 'pass'
           : 'none';
@@ -570,7 +590,7 @@ export default function BuilderPage() {
     for (const kind of kinds) {
       const selections = build.selections.filter((s) => s.kind === kind);
       if (selections.length === 0) {
-        if (kindNeed(kind, ctx.mode) === 'needed')
+        if (requirementsKnown && kindNeed(kind, ctx.mode) === 'needed')
           rows.push(
             <EmptyRow key={kind} kind={kind} onChoose={() => void navigate(kindPath(kind))} />,
           );
@@ -592,7 +612,7 @@ export default function BuilderPage() {
             item={item}
             price={
               item && selection.enabled
-                ? itemPrice(item, build, byId, pricebook.data, selection)
+                ? itemPrice(item, build, byId, pricebook.data, catalog.data?.id, selection)
                 : undefined
             }
             enabled={selection.enabled}
@@ -763,7 +783,7 @@ export default function BuilderPage() {
                 ? `Incompatible — ${failed} compatibility error${failed === 1 ? '' : 's'}`
                 : unknown
                   ? `Unknowns — ${unknown} check${unknown === 1 ? '' : 's'} unknown`
-                  : cov.missing.length
+                  : requirementsKnown && cov.missing.length
                     ? `${cov.missing.length} required component${cov.missing.length === 1 ? '' : 's'} missing`
                     : report
                       ? 'Compatible (rules pass) — no compatibility errors'
@@ -776,19 +796,27 @@ export default function BuilderPage() {
                 ? 'See the compatibility notes below.'
                 : unknown
                   ? 'Unknown is not a pass.'
-                  : cov.missing.length
+                  : requirementsKnown && cov.missing.length
                     ? 'The rows marked Required are still empty.'
                     : undefined
           }
           stats={[
-            { label: 'Required', value: `${requiredDone}/${cov.needed.length}` },
+            {
+              label: 'Required',
+              value: requirementsKnown ? `${requiredDone}/${cov.needed.length}` : 'Not evaluated',
+              unknown: !requirementsKnown,
+            },
             { label: 'Selected', value: String(selectedCount) },
             {
               label: 'Est. monthly',
               value: total ? headline.text.split(' /')[0]! : '—',
               unknown: !total || total.coverage !== 'complete',
             },
-            { label: 'Unknown checks', value: String(unknown), unknown: unknown > 0 },
+            {
+              label: 'Unknown checks',
+              value: report ? String(unknown) : 'Not evaluated',
+              unknown: !report || unknown > 0,
+            },
           ]}
         />
 
@@ -895,6 +923,7 @@ export default function BuilderPage() {
                       tier={layer.tier}
                       ctx={ctx}
                       build={build}
+                      requirementsKnown={requirementsKnown}
                       onAdd={() => void navigate(`/catalog?layer=${layer.tier}`)}
                     />,
                     ...rowsFor(layer.tier),

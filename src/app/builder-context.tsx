@@ -251,19 +251,33 @@ export function BuilderProvider({ children }: { children: ReactNode }) {
       const next = commit(current, change, summary, changedKinds);
       draftRef.current = next;
       setDraft(next);
-      if (graph.data) {
-        const before = buildContext(current.build, catalogById);
-        const after = buildContext(next.build, catalogById);
+      if (
+        graph.data &&
+        graph.data.id === current.build.locks.dependency_graph_id &&
+        graph.data.revision === current.build.locks.dependency_graph_revision &&
+        graph.data.id === next.build.locks.dependency_graph_id &&
+        graph.data.revision === next.build.locks.dependency_graph_revision
+      ) {
+        const before = buildContext(
+          current.build,
+          snapshotId === current.build.locks.catalog_snapshot_id ? catalogById : new Map(),
+        );
+        const after = buildContext(
+          next.build,
+          snapshotId === next.build.locks.catalog_snapshot_id ? catalogById : new Map(),
+        );
         setLastChange({
           ...affectedByChange(graph.data, changedKinds, before, after),
           revision: next.build.revision,
           summary,
         });
+      } else {
+        setLastChange(null);
       }
       persist(next);
       return true;
     },
-    [catalogById, graph.data, persist],
+    [catalogById, graph.data, persist, snapshotId],
   );
 
   const finishStart = useCallback(

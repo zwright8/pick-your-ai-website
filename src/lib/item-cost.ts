@@ -100,11 +100,16 @@ export function itemPrice(
   build: BuildSnapshot | null | undefined,
   catalog: ReadonlyMap<string, CatalogItem>,
   pricebook: Pricebook | undefined,
+  catalogSnapshotId: string | undefined,
   selected?: Selection | null,
 ): ItemPrice {
   const currency = build?.objectives.currency ?? 'USD';
   if (item.billing_class === 'unknown') return { ...UNKNOWN, currency };
   if (!build || !pricebook) return { ...UNKNOWN, currency };
+
+  if (catalogSnapshotId !== build.locks.catalog_snapshot_id) {
+    return { ...UNKNOWN, currency, note: 'The locked catalog snapshot is unavailable.' };
+  }
 
   if (build.locks.pricebook_id && pricebook.id !== build.locks.pricebook_id) {
     return { ...UNKNOWN, currency, note: 'The locked pricebook is unavailable.' };
@@ -171,10 +176,12 @@ export function itemPriceMap(
   items: readonly CatalogItem[],
   build: BuildSnapshot | null | undefined,
   pricebook: Pricebook | undefined,
+  catalogSnapshotId: string | undefined,
 ): Map<string, ItemPrice> {
   const byId = new Map(items.map((i) => [i.id, i]));
   const map = new Map<string, ItemPrice>();
-  for (const item of items) map.set(item.id, itemPrice(item, build, byId, pricebook));
+  for (const item of items)
+    map.set(item.id, itemPrice(item, build, byId, pricebook, catalogSnapshotId));
   return map;
 }
 

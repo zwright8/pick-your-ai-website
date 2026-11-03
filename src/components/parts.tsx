@@ -222,11 +222,11 @@ export function MiniBuild({
 }: {
   dataMode: 'fixture' | 'http';
   selected: number;
-  required: { done: number; total: number };
+  required: { done: number; total: number } | undefined;
   outcome: 'pass' | 'fail' | 'unknown' | 'none';
   cost: CostEstimate | undefined;
-  conflicts: number;
-  unknown: number;
+  conflicts: number | undefined;
+  unknown: number | undefined;
   /** Presence-only incompleteness (#294): a missing required pick is not an incompatibility. */
   incomplete?: { chosen: number; total: number; remediation: string } | undefined;
 }) {
@@ -240,17 +240,15 @@ export function MiniBuild({
       </div>
       <div className="pbox-row">
         <span>Required</span>
-        <strong>
-          {required.done}/{required.total}
-        </strong>
+        <strong>{required ? `${required.done}/${required.total}` : 'Not evaluated'}</strong>
       </div>
       <div className="pbox-row">
         <span>Conflicts</span>
-        <strong>{conflicts}</strong>
+        <strong>{conflicts ?? 'Not evaluated'}</strong>
       </div>
       <div className="pbox-row">
         <span>Unknown checks</span>
-        <strong>{unknown}</strong>
+        <strong>{unknown ?? 'Not evaluated'}</strong>
       </div>
       <div className="pbox-row total">
         <span>Est. {cost?.period_days ?? 30}-day cost</span>

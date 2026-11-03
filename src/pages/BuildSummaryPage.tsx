@@ -247,7 +247,11 @@ export default function BuildSummaryPage() {
           </div>
           <p>
             {!report
-              ? 'Add components and the published rules will be evaluated for this revision.'
+              ? analysis.evaluation.isError
+                ? 'The published rules could not be evaluated. Use the retry action below.'
+                : build.selections.length
+                  ? 'The published rules are being evaluated for this revision.'
+                  : 'Add components and the published rules will be evaluated for this revision.'
               : incomplete
                 ? `${incomplete.remediation} Provisional inference from presence rules; the contract findings below are unchanged.`
                 : outcome === 'fail'
@@ -338,7 +342,9 @@ export default function BuildSummaryPage() {
         <section className="panel" aria-labelledby="findings-heading">
           <h2 id="findings-heading">Findings</h2>
           {!report ? (
-            build.selections.length ? (
+            analysis.evaluation.isError ? (
+              <p>Evaluation unavailable for this revision.</p>
+            ) : build.selections.length ? (
               <Loading label={`Evaluating revision ${build.revision}…`} />
             ) : (
               <EmptyState

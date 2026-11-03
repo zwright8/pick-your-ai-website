@@ -120,7 +120,9 @@ function HeroPreview() {
         : item.version !== sel.catalog_item_version
           ? `Selected version ${sel.catalog_item_version}; catalog version ${item.version}`
           : null,
-      price: item ? itemPrice(item, build, catalog.byId, pricebook.data, sel).label : 'Unknown',
+      price: item
+        ? itemPrice(item, build, catalog.byId, pricebook.data, catalog.data?.id, sel).label
+        : 'Unknown',
     };
   });
   const total = costShort(analysis.costIsCurrent ? analysis.cost : undefined);

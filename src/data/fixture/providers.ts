@@ -18,6 +18,7 @@ import { estimateCost } from '../../domain/cost';
 import { evaluateBuild } from '../../domain/evaluator';
 import { DataError } from '../errors';
 import { hasConsistentCostCurrency } from '../cost-evidence';
+import { matchesBuildEvidence, matchesCostEvidence } from '../evidence-context';
 import { LocalBuildRepository } from '../local-builds';
 import {
   ProvenanceEvidenceProvider,
@@ -100,22 +101,44 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
     this.catalog = catalog;
     this.now = now;
   }
+  private async pinnedArtifacts(build: BuildSnapshot) {
+    const [snapshot, ruleset, graph] = await Promise.all([
+      this.catalog.getSnapshot(build.locks.catalog_snapshot_id),
+      this.catalog.getRuleset(),
+      this.catalog.getDependencyGraph(),
+    ]);
+    if (snapshot.id !== build.locks.catalog_snapshot_id)
+      throw new DataError('not_found', 'The pinned catalog snapshot is unavailable.');
+    if (ruleset.id !== build.locks.ruleset_id || ruleset.version !== build.locks.ruleset_version)
+      throw new DataError('not_found', 'The pinned ruleset is unavailable.');
+    if (
+      graph.id !== build.locks.dependency_graph_id ||
+      graph.revision !== build.locks.dependency_graph_revision
+    )
+      throw new DataError('not_found', 'The pinned dependency graph is unavailable.');
+    return { snapshot, ruleset };
+  }
   async evaluate(
     build: BuildSnapshot,
     evidence: EvaluationEvidence = {},
   ): Promise<EvaluationReport> {
-    const [snapshot, ruleset] = await Promise.all([
-      this.catalog.getSnapshot(),
-      this.catalog.getRuleset(),
-    ]);
+    const submitted = structuredClone(build);
+    const submittedEvidence = structuredClone(evidence);
+    const { snapshot, ruleset } = await this.pinnedArtifacts(submitted);
     const report = evaluateBuild({
-      build,
-      catalog: catalogForBuildEvidence(build, snapshot),
+      build: submitted,
+      catalog: catalogForBuildEvidence(submitted, snapshot),
       ruleset,
-      resourceEstimate: evidence.resourceEstimate ?? null,
+      resourceEstimate:
+        submittedEvidence.resourceEstimate &&
+        matchesBuildEvidence(submitted, submittedEvidence.resourceEstimate)
+          ? submittedEvidence.resourceEstimate
+          : null,
       costEstimate:
-        evidence.costEstimate && hasConsistentCostCurrency(evidence.costEstimate)
-          ? evidence.costEstimate
+        submittedEvidence.costEstimate &&
+        matchesCostEvidence(submitted, submittedEvidence.costEstimate) &&
+        hasConsistentCostCurrency(submittedEvidence.costEstimate)
+          ? submittedEvidence.costEstimate
           : null,
       evaluatedAt: this.now(),
     });
@@ -126,11 +149,9 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
     kind: ComponentKind,
     role = 'primary',
   ): Promise<CompatibleOption[]> {
-    const [snapshot, ruleset] = await Promise.all([
-      this.catalog.getSnapshot(),
-      this.catalog.getRuleset(),
-    ]);
-    return compatibleOptionsLocal(build, snapshot, ruleset, kind, role);
+    const submitted = structuredClone(build);
+    const { snapshot, ruleset } = await this.pinnedArtifacts(submitted);
+    return compatibleOptionsLocal(submitted, snapshot, ruleset, kind, role);
   }
 }
 
@@ -155,12 +176,17 @@ export class FixturePricingProvider implements PricingProvider {
     return pricebook;
   }
   async estimate(build: BuildSnapshot, periodDays = 30): Promise<CostEstimate> {
-    const snapshot = await this.catalog.getSnapshot();
-    const pricebook = await this.getPricebook(build.locks.pricebook_id);
-    const estimate = estimateCost(build, new Map(snapshot.items.map((i) => [i.id, i])), pricebook, {
-      periodDays,
-      now: this.now(),
-    });
+    const submitted = structuredClone(build);
+    const snapshot = await this.catalog.getSnapshot(submitted.locks.catalog_snapshot_id);
+    if (snapshot.id !== submitted.locks.catalog_snapshot_id)
+      throw new DataError('not_found', 'The pinned catalog snapshot is unavailable.');
+    const pricebook = await this.getPricebook(submitted.locks.pricebook_id);
+    const estimate = estimateCost(
+      submitted,
+      new Map(snapshot.items.map((i) => [i.id, i])),
+      pricebook,
+      { periodDays, now: this.now() },
+    );
     return assertContract('CostEstimate', estimate);
   }
 }

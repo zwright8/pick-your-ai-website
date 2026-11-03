@@ -48,6 +48,16 @@ describe('catalog price ordering', () => {
 });
 
 describe('itemPrice pricebook lock', () => {
+  it('does not price an item using a different catalog snapshot', () => {
+    const locked = { ...build, locks: { ...build.locks, catalog_snapshot_id: 'catalog.foreign' } };
+    const price = itemPrice(item('model', 'aurora-large'), locked, BY_ID, PRICEBOOK, CATALOG.id);
+    expect(price.amount).toBeNull();
+    expect(price.note).toContain('catalog snapshot');
+    expect(
+      itemPrice(item('model', 'aurora-large'), build, BY_ID, PRICEBOOK, undefined).amount,
+    ).toBeNull();
+  });
+
   it('prices a candidate at its own version while leaving a stale selected version unknown', () => {
     const model = item('model', 'aurora-large');
     const stale = {
@@ -60,13 +70,13 @@ describe('itemPrice pricebook lock', () => {
     };
     const selected = stale.selections.find((selection) => selection.kind === 'model');
     if (!selected) throw new Error('Missing model selection');
-    expect(itemPrice(model, stale, BY_ID, PRICEBOOK).amount).toBe('324.00');
-    expect(itemPrice(model, stale, BY_ID, PRICEBOOK, selected).amount).toBeNull();
+    expect(itemPrice(model, stale, BY_ID, PRICEBOOK, CATALOG.id).amount).toBe('324.00');
+    expect(itemPrice(model, stale, BY_ID, PRICEBOOK, CATALOG.id, selected).amount).toBeNull();
   });
 
   it('rejects default rates when the build locks another pricebook', () => {
     const locked = { ...build, locks: { ...build.locks, pricebook_id: 'pricebook.unavailable' } };
-    const price = itemPrice(item('model', 'aurora-large'), locked, BY_ID, PRICEBOOK);
+    const price = itemPrice(item('model', 'aurora-large'), locked, BY_ID, PRICEBOOK, CATALOG.id);
     expect(price.amount).toBeNull();
     expect(price.label).toBe('Unknown');
     expect(price.note).toContain('locked pricebook');
@@ -75,7 +85,9 @@ describe('itemPrice pricebook lock', () => {
   it('uses matching locked rates', () => {
     const custom = { ...PRICEBOOK, id: 'pricebook.custom' };
     const locked = { ...build, locks: { ...build.locks, pricebook_id: custom.id } };
-    expect(itemPrice(item('model', 'aurora-large'), locked, BY_ID, custom).amount).not.toBeNull();
+    expect(
+      itemPrice(item('model', 'aurora-large'), locked, BY_ID, custom, CATALOG.id).amount,
+    ).not.toBeNull();
   });
 });
 
@@ -90,7 +102,7 @@ describe('itemPrice aggregates every applicable meter', () => {
       ...PRICEBOOK,
       rates: [...PRICEBOOK.rates, { ...input, id: 'rate.demo.competing-input' }],
     };
-    const price = itemPrice(large, build, BY_ID, conflicting);
+    const price = itemPrice(large, build, BY_ID, conflicting, CATALOG.id);
     expect(price.partial).toBe(true);
     expect(price.label).toMatch(/^≥ /);
     expect(price.amount).toBe('216.00');
@@ -99,7 +111,7 @@ describe('itemPrice aggregates every applicable meter', () => {
 
   it('sums both token meters of a model that has two valid rates', () => {
     const large = item('model', 'aurora-large');
-    const price = itemPrice(large, build, BY_ID, PRICEBOOK);
+    const price = itemPrice(large, build, BY_ID, PRICEBOOK, CATALOG.id);
     // Same arithmetic as the aggregate estimator, which is the whole point of the probe build.
     const probe = addOrReplace(
       { ...build, id: 'probe.manual', revision: 1, selections: [] },
@@ -127,7 +139,7 @@ describe('itemPrice aggregates every applicable meter', () => {
     const lines = estimate.line_items.filter((l) => l.selection_id === probe.selections[0]!.id);
     expect(lines.length).toBeGreaterThan(1);
     const first = lines[0]!.amount.amount;
-    const price = itemPrice(large, build, BY_ID, PRICEBOOK);
+    const price = itemPrice(large, build, BY_ID, PRICEBOOK, CATALOG.id);
     expect(price.amount).not.toBe(first);
     expect(Number(price.amount)).toBeGreaterThan(Number(first));
   });
@@ -135,7 +147,7 @@ describe('itemPrice aggregates every applicable meter', () => {
   it('marks a valid input meter plus an expired output meter as a partial lower bound', () => {
     // aurora-mini's output rate is deliberately expired in the demo pricebook.
     const mini = item('model', 'aurora-mini');
-    const price = itemPrice(mini, build, BY_ID, PRICEBOOK);
+    const price = itemPrice(mini, build, BY_ID, PRICEBOOK, CATALOG.id);
     expect(price.amount).not.toBeNull();
     expect(price.partial).toBe(true);
     expect(price.label).toMatch(/^≥ /);
@@ -154,7 +166,7 @@ describe('itemPrice aggregates every applicable meter', () => {
           : rate,
       ),
     };
-    const price = itemPrice(mini, build, BY_ID, expired);
+    const price = itemPrice(mini, build, BY_ID, expired, CATALOG.id);
     expect(price.amount).toBeNull();
     expect(price.label).toBe('Unknown');
     expect(price.partial).toBe(false);
@@ -180,8 +192,8 @@ describe('itemPrice aggregates every applicable meter', () => {
         s.id === selection.id ? { ...s, settings: { ...s.settings, instances: 3 } } : s,
       ),
     };
-    const one = itemPrice(profile, gpuHeavy, BY_ID, PRICEBOOK);
-    const three = itemPrice(profile, scaled, BY_ID, PRICEBOOK);
+    const one = itemPrice(profile, gpuHeavy, BY_ID, PRICEBOOK, CATALOG.id);
+    const three = itemPrice(profile, scaled, BY_ID, PRICEBOOK, CATALOG.id);
     expect(one.amount).not.toBeNull();
     expect(three.amount).not.toBeNull();
     // Defaults must not replace the user's configured instance count.
@@ -190,11 +202,11 @@ describe('itemPrice aggregates every applicable meter', () => {
 
   it('returns Unknown when there is no build or no pricebook, and for unknown billing', () => {
     const large = item('model', 'aurora-large');
-    expect(itemPrice(large, null, BY_ID, PRICEBOOK).label).toBe('Unknown');
-    expect(itemPrice(large, build, BY_ID, undefined).label).toBe('Unknown');
+    expect(itemPrice(large, null, BY_ID, PRICEBOOK, CATALOG.id).label).toBe('Unknown');
+    expect(itemPrice(large, build, BY_ID, undefined, CATALOG.id).label).toBe('Unknown');
     const unknownBilling = item('data_source', 'crm') as CatalogItem;
     expect(unknownBilling.billing_class).toBe('unknown');
-    expect(itemPrice(unknownBilling, build, BY_ID, PRICEBOOK).label).toBe('Unknown');
+    expect(itemPrice(unknownBilling, build, BY_ID, PRICEBOOK, CATALOG.id).label).toBe('Unknown');
   });
 });
 
@@ -206,7 +218,7 @@ describe('itemPrice derives free/included from the build policy', () => {
     expect(freeItem.provenance.every((p) => p.verification_status !== 'verified')).toBe(true);
     // A build with no policy at all must not admit an unverified free item as zero cost.
     const noPolicy = { ...build, policy: undefined };
-    const rejected = itemPrice(freeItem, noPolicy, BY_ID, PRICEBOOK);
+    const rejected = itemPrice(freeItem, noPolicy, BY_ID, PRICEBOOK, CATALOG.id);
     expect(rejected.amount).toBeNull();
     expect(rejected.included).toBe(false);
     expect(rejected.label).toBe('Unknown');
@@ -215,14 +227,14 @@ describe('itemPrice derives free/included from the build policy', () => {
 
   it('is still not Included when the policy explicitly disallows unverified items', () => {
     const strict = { ...build, policy: { ...build.policy, allow_unverified_catalog_items: false } };
-    const price = itemPrice(freeItem, strict, BY_ID, PRICEBOOK);
+    const price = itemPrice(freeItem, strict, BY_ID, PRICEBOOK, CATALOG.id);
     expect(price.amount).toBeNull();
     expect(price.included).toBe(false);
   });
 
   it('is Included only when the policy allows unverified catalog items, and says so', () => {
     const loose = { ...build, policy: { ...build.policy, allow_unverified_catalog_items: true } };
-    const price = itemPrice(freeItem, loose, BY_ID, PRICEBOOK);
+    const price = itemPrice(freeItem, loose, BY_ID, PRICEBOOK, CATALOG.id);
     expect(price.amount).toBe('0.00');
     expect(price.included).toBe(true);
     expect(price.label).toBe('Included*');
@@ -235,7 +247,7 @@ describe('itemPrice derives free/included from the build policy', () => {
       provenance: freeItem.provenance.map((p) => ({ ...p, verification_status: 'verified' })),
     };
     const byId = new Map(BY_ID).set(verified.id, verified);
-    const price = itemPrice(verified, build, byId, PRICEBOOK);
+    const price = itemPrice(verified, build, byId, PRICEBOOK, CATALOG.id);
     expect(price.amount).toBe('0.00');
     expect(price.included).toBe(true);
     expect(price.label).toBe('Included');
@@ -245,20 +257,22 @@ describe('itemPrice derives free/included from the build policy', () => {
 describe('itemPrice refuses to invent a price', () => {
   it('never returns a zero amount for a metered item with no rate', () => {
     for (const candidate of CATALOG.items.filter((i) => i.billing_class === 'metered')) {
-      const price = itemPrice(candidate, build, BY_ID, PRICEBOOK);
+      const price = itemPrice(candidate, build, BY_ID, PRICEBOOK, CATALOG.id);
       if (price.amount !== null) continue;
       expect(price.label).toBe('Unknown');
     }
     // At least one metered demo item must be unpriceable, or this test proves nothing.
     const unpriced = CATALOG.items.filter(
-      (i) => i.billing_class === 'metered' && itemPrice(i, build, BY_ID, PRICEBOOK).amount === null,
+      (i) =>
+        i.billing_class === 'metered' &&
+        itemPrice(i, build, BY_ID, PRICEBOOK, CATALOG.id).amount === null,
     );
     expect(unpriced.length).toBeGreaterThan(0);
   });
 
   it('does not leak the probe id into any note', () => {
     for (const candidate of CATALOG.items) {
-      const price = itemPrice(candidate, build, BY_ID, PRICEBOOK);
+      const price = itemPrice(candidate, build, BY_ID, PRICEBOOK, CATALOG.id);
       expect(price.note).not.toContain('probe.');
       expect(price.label).not.toContain('probe.');
     }
@@ -267,8 +281,8 @@ describe('itemPrice refuses to invent a price', () => {
   it('prices the demo item ids that the parts register renders', () => {
     const large = demoItemId('model', 'aurora-large');
     expect(BY_ID.has(large)).toBe(true);
-    expect(itemPrice(item('model', 'aurora-large'), build, BY_ID, PRICEBOOK).amount).toMatch(
-      /^\d+\.\d{2}$/,
-    );
+    expect(
+      itemPrice(item('model', 'aurora-large'), build, BY_ID, PRICEBOOK, CATALOG.id).amount,
+    ).toMatch(/^\d+\.\d{2}$/);
   });
 });
