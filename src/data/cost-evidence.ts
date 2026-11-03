@@ -32,14 +32,14 @@ export function hasKnownCostSelections(
   );
 }
 
-/** Admit provider estimates only for the requested build and explicit pricebook, in one currency. */
+/** Admit 30-day estimates only for the requested build and pricebook, in one currency. */
 export async function estimateBuildCost(
   pricing: PricingProvider,
   build: BuildSnapshot,
 ): Promise<CostEstimate> {
   const context = { id: build.id, revision: build.revision, locks: { ...build.locks } };
   const selectionIds = new Set(build.selections.map((selection) => selection.id));
-  const cost = await pricing.estimate(build);
+  const cost = await pricing.estimate(build, 30);
   if (!matchesCostEvidence(context, cost))
     throw new DataError(
       'malformed',
@@ -48,6 +48,10 @@ export async function estimateBuildCost(
         contract: 'CostEstimate',
       },
     );
+  if (cost.period_days !== 30)
+    throw new DataError('malformed', 'Cost estimate does not match the requested 30-day period.', {
+      contract: 'CostEstimate',
+    });
   if (!hasConsistentCostCurrency(cost))
     throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
       contract: 'CostEstimate',

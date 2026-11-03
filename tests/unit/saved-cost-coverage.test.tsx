@@ -179,7 +179,7 @@ describe('saved build cost coverage', () => {
     expect(metric).toHaveTextContent('lower bound');
   });
 
-  it('groups currencies and periods and orders comparable amounts without rounding', async () => {
+  it('orders comparable amounts without rounding and withholds a mismatched period', async () => {
     mockBuilder(null);
     const providers = createFixtureProviders({ now: () => NOW });
     const template = apiChat();
@@ -200,7 +200,7 @@ describe('saved build cost coverage', () => {
         amount: '9007199254740992',
       },
       { id: 'build.week', name: 'US week', currency: 'USD', days: 7, amount: '99999999999999999' },
-      { id: 'build.partial', name: 'Partial', currency: 'EUR', days: 60, amount: '1' },
+      { id: 'build.partial', name: 'Partial', currency: 'EUR', days: 30, amount: '1' },
       { id: 'build.unknown', name: 'Unknown', currency: 'EUR', days: 30, amount: '0' },
     ];
     for (const example of examples)
@@ -251,9 +251,11 @@ describe('saved build cost coverage', () => {
     expect(screen.getByText(/grouped by coverage, currency and period/)).toBeVisible();
     expect(
       screen.getAllByRole('article').map((card) => within(card).getByRole('heading').textContent),
-    ).toEqual(['Euro', 'US week', 'US smaller', 'US bigger', 'Partial', 'Unknown']);
+    ).toEqual(['Euro', 'US smaller', 'US bigger', 'Partial', 'Unknown', 'US week']);
     const partial = screen.getByRole('heading', { name: 'Partial' }).closest('article');
-    expect(partial).toHaveTextContent('Partial · EUR · 60 days');
+    expect(partial).toHaveTextContent('Partial · EUR · 30 days');
+    const week = screen.getByRole('heading', { name: 'US week' }).closest('article');
+    expect(week).toHaveTextContent('Unavailable');
     view.unmount();
     client.clear();
   });

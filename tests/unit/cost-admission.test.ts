@@ -81,6 +81,22 @@ describe('cost estimate admission', () => {
     },
   );
 
+  it('requests the 30-day period explicitly and rejects a different response period', async () => {
+    const build = apiChat();
+    const providers = createFixtureProviders({ now: () => NOW });
+    const cost = await providers.pricing.estimate(build);
+    const estimate = vi
+      .spyOn(providers.pricing, 'estimate')
+      .mockResolvedValue({ ...cost, period_days: 7 });
+    await expect(estimateBuildCost(providers.pricing, build)).rejects.toMatchObject({
+      kind: 'malformed',
+      contract: 'CostEstimate',
+    });
+    expect(estimate).toHaveBeenCalledWith(build, 30);
+    estimate.mockResolvedValue(cost);
+    await expect(estimateBuildCost(providers.pricing, build)).resolves.toEqual(cost);
+  });
+
   it('accepts a consistent foreign-currency estimate without conversion', async () => {
     const build = apiChat();
     const providers = createFixtureProviders({ now: () => NOW });

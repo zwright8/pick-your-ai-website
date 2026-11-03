@@ -72,7 +72,7 @@ it('recomputes analysis when the accepted save changes the current revision cont
   await act(async () => resolveSave(accepted));
   expect(hook.result.current.builder.draft?.build.objectives.requests_per_day).toBe(9000);
   expect(hook.result.current.analysis.costIsCurrent).toBe(false);
-  await waitFor(() => expect(estimate).toHaveBeenCalledWith(acceptedBuild));
+  await waitFor(() => expect(estimate).toHaveBeenCalledWith(acceptedBuild, 30));
   await act(async () => resolveCost(currentCost));
   await waitFor(() => expect(hook.result.current.analysis.costIsCurrent).toBe(true));
   hook.unmount();

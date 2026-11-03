@@ -45,7 +45,7 @@ it('withholds analysis when accepted content changes at the same build revision'
   hook.rerender({ build: accepted });
   expect(hook.result.current.costIsCurrent).toBe(false);
   expect(hook.result.current.reportIsCurrent).toBe(false);
-  await waitFor(() => expect(estimate).toHaveBeenCalledWith(accepted));
+  await waitFor(() => expect(estimate).toHaveBeenCalledWith(accepted, 30));
   await waitFor(() =>
     expect(evaluate).toHaveBeenCalledWith(accepted, { costEstimate: null, resourceEstimate: null }),
   );

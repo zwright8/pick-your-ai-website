@@ -202,6 +202,7 @@ describe('build analysis identity', () => {
     'wrong revision',
     'wrong pricebook',
     'mixed currency',
+    'wrong period',
     'contradictory coverage',
     'foreign line',
     'foreign unpriced selection',
@@ -212,6 +213,7 @@ describe('build analysis identity', () => {
     if (problem === 'wrong revision') invalid.build_revision += 1;
     if (problem === 'wrong pricebook') invalid.pricebook_id = 'pricebook.foreign';
     if (problem === 'mixed currency') invalid.total.currency = 'EUR';
+    if (problem === 'wrong period') invalid.period_days = 7;
     if (problem === 'contradictory coverage') {
       invalid.coverage = 'complete';
       invalid.unpriced_selection_ids = ['sel_model'];
