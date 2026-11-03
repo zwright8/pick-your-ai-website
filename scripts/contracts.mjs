@@ -25,8 +25,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const VENDOR_DIR = join(ROOT, 'contracts', 'v1');
 const PROVENANCE = join(ROOT, 'contracts', 'PROVENANCE.json');
 const UPSTREAM_REPO = 'https://github.com/Pick-Your-AI/pick-your-ai-research.git';

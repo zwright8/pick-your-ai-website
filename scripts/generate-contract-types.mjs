@@ -3,10 +3,11 @@
 // Output: src/contracts/generated/contract-types.ts — never edit by hand; CI checks it is current.
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { compile } from 'json-schema-to-typescript';
 import prettier from 'prettier';
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCHEMA_DIR = join(ROOT, 'contracts', 'v1', 'schemas');
 const OUT_DIR = join(ROOT, 'src', 'contracts', 'generated');
 const ID_BASE = 'https://schemas.ai-builder.example/v1/';
