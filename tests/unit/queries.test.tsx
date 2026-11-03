@@ -105,6 +105,71 @@ async function analysisHarness() {
 }
 
 describe('build analysis identity', () => {
+  it('rejects capacity evidence tied to disabled selections and recovers on retry', async () => {
+    const build = selfHosted();
+    const model = build.selections.find((selection) => selection.id === 'sel_model');
+    if (!model) throw new Error('Missing model');
+    build.selections.push({
+      ...model,
+      id: 'sel_model_disabled',
+      role: 'secondary',
+      enabled: false,
+    });
+    const providers = createFixtureProviders({ now: () => NOW });
+    const valid = resourceEstimate(build, '20', 'calibrated');
+    const invalid = {
+      ...valid,
+      estimates: valid.estimates.map((entry) => ({
+        ...entry,
+        selection_ids: ['sel_model_disabled'],
+      })),
+    };
+    const estimate = vi
+      .spyOn(providers.resources, 'estimate')
+      .mockResolvedValue({ status: 'available', estimate: invalid });
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: createDraft(build),
+      ready: true,
+      catalogById: BY_ID,
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const wrapper = wrapperFor(providers, client);
+    const hook = renderHook(() => useBuildAnalysis(build), { wrapper });
+    const view = render(<BuildSummaryPage />, { wrapper });
+    const capacity = await screen.findByRole('region', { name: 'Capacity evidence' });
+    await waitFor(() =>
+      expect(capacity).toHaveTextContent(
+        'Resource evidence references missing or disabled selections.',
+      ),
+    );
+    await waitFor(() => expect(hook.result.current.reportIsCurrent).toBe(true));
+    expect(
+      hook.result.current.report?.findings.find(
+        (finding) => finding.rule_id === 'rule.vram.estimate.fit',
+      )?.outcome,
+    ).toBe('unknown');
+    estimate.mockResolvedValue({ status: 'available', estimate: valid });
+    fireEvent.click(within(capacity).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(capacity).toHaveTextContent('20 gb'));
+    await waitFor(() => {
+      expect(hook.result.current.reportIsCurrent).toBe(true);
+      expect(
+        hook.result.current.report?.findings.find(
+          (finding) => finding.rule_id === 'rule.vram.estimate.fit',
+        )?.outcome,
+      ).toBe('pass');
+    });
+    view.unmount();
+    hook.unmount();
+    client.clear();
+  });
+
   it('explains ambiguous capacity evidence while withholding it from the affected local rule', async () => {
     const build = selfHosted();
     const providers = createFixtureProviders({ now: () => NOW });

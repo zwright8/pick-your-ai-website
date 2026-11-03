@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Reject capacity evidence that references disabled selections, preventing it from passing checks for the active build.
 - Reject cost estimates whose total differs from subtotal plus tax, using exact decimal arithmetic before displaying or evaluating them.
 - Request a 30-day cost estimate explicitly and reject provider results for a different period before displaying monthly costs.
 - Reject cost evidence that claims complete coverage while listing unpriced selections, or refers to selections outside the requested build.

@@ -15,8 +15,8 @@ export function hasConsistentResourceUnits(resource: ResourceEstimate): boolean 
   return resource.estimates.every((entry) => RESOURCE_UNITS[entry.metric] === entry.unit);
 }
 
-/** Every referenced selection must exist in the build revision being evaluated. */
-export function hasKnownResourceSelections(
+/** Every referenced selection must be enabled in the build revision being evaluated. */
+export function hasActiveResourceSelections(
   resource: ResourceEstimate,
   selectionIds: ReadonlySet<string>,
 ): boolean {

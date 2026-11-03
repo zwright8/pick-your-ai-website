@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { BuildSnapshot, CatalogItem, ComponentKind } from '../contracts';
 import { estimateBuildCost } from '../data/cost-evidence';
-import { hasConsistentResourceUnits, hasKnownResourceSelections } from '../data/evidence-context';
+import { hasConsistentResourceUnits, hasActiveResourceSelections } from '../data/evidence-context';
 import { DataError } from '../data/errors';
 import { evaluateBuild } from '../data/evaluation-evidence';
 import { useData } from './data-context';
@@ -75,7 +75,9 @@ export function useBuildAnalysis(build: BuildSnapshot | null | undefined) {
     queryFn: async () => {
       if (!build) throw new DataError('not_found', 'No build is available.');
       const { id, revision } = build;
-      const selectionIds = new Set(build.selections.map((selection) => selection.id));
+      const selectionIds = new Set(
+        build.selections.filter((selection) => selection.enabled).map((selection) => selection.id),
+      );
       const result = await data.resources.estimate(build);
       if (result.status === 'available') {
         if (result.estimate.build_id !== id || result.estimate.build_revision !== revision)
@@ -90,10 +92,10 @@ export function useBuildAnalysis(build: BuildSnapshot | null | undefined) {
               contract: 'ResourceEstimate',
             },
           );
-        if (!hasKnownResourceSelections(result.estimate, selectionIds))
+        if (!hasActiveResourceSelections(result.estimate, selectionIds))
           throw new DataError(
             'malformed',
-            'Resource evidence references selections outside this build.',
+            'Resource evidence references missing or disabled selections.',
             { contract: 'ResourceEstimate' },
           );
       }

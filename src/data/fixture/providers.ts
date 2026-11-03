@@ -25,7 +25,7 @@ import {
 } from '../cost-evidence';
 import {
   hasConsistentResourceUnits,
-  hasKnownResourceSelections,
+  hasActiveResourceSelections,
   matchesBuildEvidence,
   matchesCostEvidence,
   unambiguousResourceEvidence,
@@ -144,9 +144,13 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
         submittedEvidence.resourceEstimate &&
         matchesBuildEvidence(submitted, submittedEvidence.resourceEstimate) &&
         hasConsistentResourceUnits(submittedEvidence.resourceEstimate) &&
-        hasKnownResourceSelections(
+        hasActiveResourceSelections(
           submittedEvidence.resourceEstimate,
-          new Set(submitted.selections.map((selection) => selection.id)),
+          new Set(
+            submitted.selections
+              .filter((selection) => selection.enabled)
+              .map((selection) => selection.id),
+          ),
         )
           ? unambiguousResourceEvidence(submitted, submittedEvidence.resourceEstimate)
           : null,

@@ -23,7 +23,7 @@ import {
 } from '../cost-evidence';
 import {
   hasConsistentResourceUnits,
-  hasKnownResourceSelections,
+  hasActiveResourceSelections,
   matchesBuildEvidence,
   matchesCostEvidence,
 } from '../evidence-context';
@@ -164,14 +164,18 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
     }
     if (
       evidence.resourceEstimate &&
-      !hasKnownResourceSelections(
+      !hasActiveResourceSelections(
         evidence.resourceEstimate,
-        new Set(build.selections.map((selection) => selection.id)),
+        new Set(
+          build.selections
+            .filter((selection) => selection.enabled)
+            .map((selection) => selection.id),
+        ),
       )
     ) {
       throw new DataError(
         'malformed',
-        'Resource evidence references selections outside this build.',
+        'Resource evidence references missing or disabled selections.',
         {
           contract: 'ResourceEstimate',
         },

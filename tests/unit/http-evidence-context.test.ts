@@ -401,6 +401,29 @@ it('retains a single qualified metric when another estimate is below the confide
   ).toBe('pass');
 });
 
+it('does not use capacity evidence tied to a disabled selection', async () => {
+  const build = selfHosted();
+  const model = build.selections.find((selection) => selection.id === 'sel_model');
+  if (!model) throw new Error('Missing model');
+  build.selections.push({ ...model, id: 'sel_model_disabled', role: 'secondary', enabled: false });
+  const resource = resourceEstimate(build, '20', 'calibrated');
+  resource.estimates = resource.estimates.map((entry) => ({
+    ...entry,
+    selection_ids: ['sel_model_disabled'],
+  }));
+  assertContract('BuildSnapshot', build);
+  assertContract('ResourceEstimate', resource);
+  const report = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+  expect(
+    report.findings.find((finding) => finding.rule_id === 'rule.vram.estimate.fit')?.outcome,
+  ).toBe('unknown');
+  const api = responseApi({});
+  await expect(
+    providers(api).compatibility.evaluate(build, { resourceEstimate: resource }),
+  ).rejects.toMatchObject({ kind: 'malformed', contract: 'ResourceEstimate' });
+  expect(api).not.toHaveBeenCalled();
+});
+
 it.each([
   ['a nonexistent selection', ['sel_nonexistent']],
   ['no selections', []],
