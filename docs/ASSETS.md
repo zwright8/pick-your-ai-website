@@ -32,11 +32,11 @@ third-party request.
 `fonts.css` also declares a `'<Family> Fallback'` face per family, naming a local system font and
 correcting it with `size-adjust` / `ascent-override` / `descent-override`. `font-display: swap` paints
 text immediately in the fallback and swaps when the webfont lands; without matched metrics that swap
-reflows the page. The line box matches the webfont **exactly** for all three families, and the advance
-width is within ~3% (the browser quantises `size-adjust` to whole pixels, so an exact width match is
-not achievable by scaling). `tests/e2e/font-fallback-metrics.spec.ts` asserts both the match and that
-the adjusted fallback is measurably closer than the plain generic family — otherwise deleting the
-overrides would still pass.
+can reflow the page. The actual match depends on the local fonts available to the browser.
+`tests/e2e/font-fallback-metrics.spec.ts` checks that each fallback face loads and, for its sample
+strings at 100px, that advance width differs by less than 4.5% and normal line height by at most
+5px. A generic system font can already match a webfont's metrics, so the test does not assume the
+adjusted fallback must always measure differently or be closer than that generic font.
 
 The two mono faces use `font-display: optional`: they are the last thing painted, and a late swap
 would re-lay every numeric column.

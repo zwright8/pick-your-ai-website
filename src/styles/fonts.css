@@ -62,11 +62,11 @@
  * `font-display: swap` shows text immediately in a system font, then swaps when the webfont lands.
  * If the two have different advance widths and line boxes the swap reflows the page, which is what
  * `size-adjust` / `ascent-override` / `descent-override` exist to prevent: they make the fallback
- * occupy the same space as the webfont, so the swap is invisible.
+ * approximate the webfont metrics and reduce layout shift during the swap.
  *
  * The numbers are measured, not guessed — `tests/e2e/font-fallback-metrics.spec.ts` renders a sample
- * string in both the webfont and its fallback family and asserts the width and height agree, so a
- * change to either face fails the build instead of silently reintroducing layout shift.
+ * set of strings in the webfont and fallback and checks bounded differences in width and normal
+ * line height. Actual metrics depend on the local fonts available to the browser.
  *
  * The `src` lists are ordered so the metric-compatible Arial (or Liberation Sans, which is
  * metric-compatible with it) wins where present. Courier New / Liberation Mono already match IBM Plex

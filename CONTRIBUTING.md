@@ -49,12 +49,21 @@ The team names above were aligned on 2026-10-29; the listed people remain the hi
 | `format` / `format:check` | Prettier                                                                       |
 | `lint`                    | ESLint (zero warnings)                                                         |
 | `typecheck`               | `tsc -b` in strict mode                                                        |
+| `test:visual`             | Compare route screenshots with the checked-in visual baselines                 |
+| `test:lighthouse`         | Check mobile performance and accessibility budgets                             |
 | `contracts:verify`        | Check vendored contract hashes (`-- --upstream` also compares with GitHub)     |
 | `contracts:update`        | Re-vendor `contracts/v1` (`-- --ref <sha>`)                                    |
 | `contracts:types`         | Regenerate TypeScript types from the JSON Schemas                              |
 | `test`                    | Vitest unit and integration tests                                              |
 | `test:e2e`                | Playwright smoke and axe accessibility tests against `vite preview`            |
 | `audit`                   | `npm audit` for production dependencies (high and above)                       |
+
+Build `dist/` before running the visual or Lighthouse checks. The required CI visual job runs on
+Ubuntu 24.04 with `fonts-dejavu-core` and uses exact-pixel baselines. Results from another operating
+system or font environment can differ; inspect failures in the CI environment before changing
+baselines. The visual test waits for fixture results and the site's self-hosted fonts; it does not
+replace the site's typefaces with system fonts. Font availability and rendering can still differ
+across environments, so compare and review baseline changes in the Linux CI environment.
 
 ## Changing the contract
 
