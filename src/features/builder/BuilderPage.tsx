@@ -38,7 +38,14 @@ import { useBuildAnalysis, useCatalog, usePricebook, useRuleset } from '../../ap
 import { ErrorState, Loading, Modal, useToast } from '../../components/feedback';
 import { Icon } from '../../components/icon';
 import { SyntheticBadge } from '../../components/status';
-import { Findings, Money, NotEvaluated, PartsHead, StatusStrip } from '../../components/parts';
+import {
+  CostTotals,
+  Findings,
+  Money,
+  NotEvaluated,
+  PartsHead,
+  StatusStrip,
+} from '../../components/parts';
 import { flaggedFindings, costHeadline } from './analysis';
 import { evidenceLine } from './evidence';
 import { incompleteBuild } from './incomplete';
@@ -882,55 +889,62 @@ export default function BuilderPage() {
             <div className="pdetails-body">
               {total ? (
                 <>
-                  <div className="pt-scroll" tabIndex={0} role="region" aria-label="Cost lines">
-                    <table className="pt">
-                      <thead>
-                        <tr>
-                          <th scope="col">
-                            <span>Selection</span>
-                          </th>
-                          <th scope="col">
-                            <span>Meter</span>
-                          </th>
-                          <th scope="col" className="num">
-                            <span>Qty</span>
-                          </th>
-                          <th scope="col" className="num">
-                            <span>Unit</span>
-                          </th>
-                          <th scope="col" className="num">
-                            <span>Amount</span>
-                          </th>
-                          <th scope="col">
-                            <span>Confidence</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {total.line_items.map((li) => {
-                          const sel = build.selections.find((s) => s.id === li.selection_id);
-                          const item = sel ? byId.get(sel.catalog_item_id) : undefined;
-                          return (
-                            <tr key={li.id}>
-                              <th scope="row">{item?.name ?? li.selection_id}</th>
-                              <td>{li.meter.replace(/_/g, ' ')}</td>
-                              <td className="num">{li.quantity}</td>
-                              <td className="num">
-                                <Money
-                                  amount={li.unit_price.amount}
-                                  currency={li.unit_price.currency}
-                                />
-                              </td>
-                              <td className="num">
-                                <Money amount={li.amount.amount} currency={li.amount.currency} />
-                              </td>
-                              <td>{li.confidence}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  {total.line_items.length ? (
+                    <div className="pt-scroll" tabIndex={0} role="region" aria-label="Cost lines">
+                      <table className="pt">
+                        <thead>
+                          <tr>
+                            <th scope="col">
+                              <span>Selection</span>
+                            </th>
+                            <th scope="col">
+                              <span>Meter</span>
+                            </th>
+                            <th scope="col" className="num">
+                              <span>Qty</span>
+                            </th>
+                            <th scope="col" className="num">
+                              <span>Unit</span>
+                            </th>
+                            <th scope="col" className="num">
+                              <span>Amount</span>
+                            </th>
+                            <th scope="col">
+                              <span>Confidence</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {total.line_items.map((li) => {
+                            const sel = build.selections.find((s) => s.id === li.selection_id);
+                            const item = sel ? byId.get(sel.catalog_item_id) : undefined;
+                            return (
+                              <tr key={li.id}>
+                                <th scope="row">{item?.name ?? li.selection_id}</th>
+                                <td>{li.meter.replace(/_/g, ' ')}</td>
+                                <td className="num">{li.quantity}</td>
+                                <td className="num">
+                                  <Money
+                                    amount={li.unit_price.amount}
+                                    currency={li.unit_price.currency}
+                                  />
+                                </td>
+                                <td className="num">
+                                  <Money amount={li.amount.amount} currency={li.amount.currency} />
+                                </td>
+                                <td>{li.confidence}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <>
+                      <p>No line items were reported.</p>
+                      {total.coverage !== 'unknown' ? <CostTotals cost={total} /> : null}
+                    </>
+                  )}
                   <p className="pbox-note" style={{ padding: '8px 0 0' }}>
                     {headline.detail} Unpriced components are never counted as zero.
                   </p>

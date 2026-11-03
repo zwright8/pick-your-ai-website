@@ -32,6 +32,7 @@ import { buildMarkdown, download } from '../features/builder/BuildToolbar';
 import { ExportWarning, type ExportWarningData } from '../features/builds/ExportWarning';
 import { incompleteBuild } from '../features/builder/incomplete';
 import { costHeadline, flaggedFindings, formatMoney, overall } from '../features/builder/analysis';
+import { CostTotals } from '../components/parts';
 
 const formatDate = (iso: string) => formatRecordedDate(iso, 'date-time');
 
@@ -710,7 +711,10 @@ function CostBreakdown({
           </table>
         </div>
       ) : (
-        <p>No line items could be priced.</p>
+        <>
+          <p>No line items were reported.</p>
+          {cost.coverage !== 'unknown' ? <CostTotals cost={cost} /> : null}
+        </>
       )}
       {cost.coverage !== 'complete' ? (
         <p className="severity severity-warning">

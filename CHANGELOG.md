@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Show reported subtotal, tax and total in empty complete and partial cost breakdowns; keep totals hidden when coverage is unknown.
 - Show nonzero totals even when an estimate has no priced line items, including tax-only estimates.
 - Preserve small and large compute and storage usage projections to contract precision, and leave unsupported precision unpriced.
 - Preserve exact request and token projections for large workload objectives, and leave unsafe imported integer inputs unpriced.

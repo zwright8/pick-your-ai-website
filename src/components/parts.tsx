@@ -13,10 +13,24 @@ import { useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { CatalogItem, CostEstimate, EvaluationReport } from '../contracts';
 import { Icon, type IconName } from './icon';
-import { costShort, formatAmount } from '../lib/item-cost';
+import { costShort, formatAmount, formatMoney } from '../lib/item-cost';
 import { toScaled } from '../domain/decimal';
 
 // --------------------------------------------------------------------------------- chips -----
+
+/** Reported totals for an estimate without line items. */
+export function CostTotals({ cost }: { cost: CostEstimate }) {
+  return (
+    <dl className="kv" aria-label="Cost totals">
+      <dt>Subtotal</dt>
+      <dd>{formatMoney(cost.subtotal.amount, cost.subtotal.currency)}</dd>
+      <dt>Tax</dt>
+      <dd>{formatMoney(cost.tax.amount, cost.tax.currency)}</dd>
+      <dt>{cost.coverage === 'partial' ? 'Total of priced items (lower bound)' : 'Total'}</dt>
+      <dd>{formatMoney(cost.total.amount, cost.total.currency)}</dd>
+    </dl>
+  );
+}
 
 export type Verdict = 'compatible' | 'incompatible' | 'unknown';
 
