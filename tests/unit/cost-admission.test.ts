@@ -97,6 +97,30 @@ describe('cost estimate admission', () => {
     await expect(estimateBuildCost(providers.pricing, build)).resolves.toEqual(cost);
   });
 
+  it.each([
+    ['9007199254740993.000000000001', '0.000000000002', '9007199254740993.000000000003', true],
+    ['9007199254740993.000000000001', '0.000000000002', '9007199254740993.000000000002', false],
+    ['0.10', '0.20', '0.3', true],
+  ] as const)(
+    'checks subtotal %s plus tax %s against total %s',
+    async (subtotal, tax, total, consistent) => {
+      const build = apiChat();
+      const providers = createFixtureProviders({ now: () => NOW });
+      const cost = await providers.pricing.estimate(build);
+      cost.subtotal.amount = subtotal;
+      cost.tax.amount = tax;
+      cost.total.amount = total;
+      vi.spyOn(providers.pricing, 'estimate').mockResolvedValue(cost);
+      if (consistent)
+        await expect(estimateBuildCost(providers.pricing, build)).resolves.toEqual(cost);
+      else
+        await expect(estimateBuildCost(providers.pricing, build)).rejects.toMatchObject({
+          kind: 'malformed',
+          contract: 'CostEstimate',
+        });
+    },
+  );
+
   it('accepts a consistent foreign-currency estimate without conversion', async () => {
     const build = apiChat();
     const providers = createFixtureProviders({ now: () => NOW });

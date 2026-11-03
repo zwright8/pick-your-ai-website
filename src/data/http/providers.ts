@@ -18,6 +18,7 @@ import { DataError, isDataError } from '../errors';
 import {
   hasCoherentCostCoverage,
   hasConsistentCostCurrency,
+  hasConsistentCostTotals,
   hasKnownCostSelections,
 } from '../cost-evidence';
 import {
@@ -181,6 +182,11 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
         contract: 'CostEstimate',
       });
     }
+    if (evidence.costEstimate && !hasConsistentCostTotals(evidence.costEstimate)) {
+      throw new DataError('malformed', 'Cost evidence total does not equal subtotal plus tax.', {
+        contract: 'CostEstimate',
+      });
+    }
     if (
       evidence.costEstimate &&
       (!hasCoherentCostCoverage(evidence.costEstimate) ||
@@ -307,6 +313,11 @@ export class HttpPricingProvider implements PricingProvider {
     }
     if (!hasConsistentCostCurrency(value)) {
       throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
+        contract: 'CostEstimate',
+      });
+    }
+    if (!hasConsistentCostTotals(value)) {
+      throw new DataError('malformed', 'Cost estimate total does not equal subtotal plus tax.', {
         contract: 'CostEstimate',
       });
     }

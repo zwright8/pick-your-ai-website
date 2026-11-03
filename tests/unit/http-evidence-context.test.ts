@@ -298,6 +298,23 @@ it.each(['contradictory coverage', 'foreign line'] as const)(
   },
 );
 
+it('does not pass the budget rule using a total that contradicts subtotal plus tax', async () => {
+  const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
+    monthly_budget_amount: '10000.00',
+  });
+  const cost = await fixture.pricing.estimate(build);
+  const valid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    valid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('pass');
+  cost.total.amount = '0';
+  assertContract('CostEstimate', cost);
+  const invalid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    invalid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('unknown');
+});
+
 it('does not use inconsistent currency evidence for the local budget rule', async () => {
   const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
     monthly_budget_amount: '10000.00',
@@ -422,6 +439,22 @@ it('does not use a foreign pricebook estimate for the local budget rule', async 
 });
 
 describe('HTTP cost response context', () => {
+  it('rejects inconsistent subtotal, tax and total in pricing responses and evaluation evidence', async () => {
+    const build = pinnedBuild();
+    const cost = await fixture.pricing.estimate(build);
+    cost.total.amount = '0';
+    assertContract('CostEstimate', cost);
+    await expect(providers(responseApi(cost)).pricing.estimate(build)).rejects.toMatchObject({
+      kind: 'malformed',
+      contract: 'CostEstimate',
+    });
+    const api = responseApi({});
+    await expect(
+      providers(api).compatibility.evaluate(build, { costEstimate: cost }),
+    ).rejects.toMatchObject({ kind: 'malformed', contract: 'CostEstimate' });
+    expect(api).not.toHaveBeenCalled();
+  });
+
   it.each([
     'complete with unpriced selection',
     'foreign line',

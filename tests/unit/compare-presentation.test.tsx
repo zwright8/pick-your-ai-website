@@ -52,6 +52,8 @@ function show(
       return {
         ...result,
         coverage: 'complete',
+        subtotal: { ...result.subtotal, amount: build.revision === 1 ? amounts[0] : amounts[1] },
+        tax: { ...result.tax, amount: '0' },
         total: {
           ...result.total,
           amount: build.revision === 1 ? amounts[0] : amounts[1],

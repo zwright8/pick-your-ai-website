@@ -1,4 +1,5 @@
 import type { BuildSnapshot, CostEstimate } from '../contracts';
+import { EvaluationNumber } from '../domain/evaluation-number';
 import { matchesCostEvidence } from './evidence-context';
 import { DataError } from './errors';
 import type { PricingProvider } from './types';
@@ -13,6 +14,16 @@ export function hasConsistentCostCurrency(cost: CostEstimate): boolean {
       (line) =>
         line.amount.currency === cost.currency && line.unit_price.currency === cost.currency,
     )
+  );
+}
+
+/** Compare reported totals without floating-point conversion or rounding. */
+export function hasConsistentCostTotals(cost: CostEstimate): boolean {
+  const subtotal = EvaluationNumber.from(cost.subtotal.amount);
+  const tax = EvaluationNumber.from(cost.tax.amount);
+  const total = EvaluationNumber.from(cost.total.amount);
+  return (
+    subtotal !== null && tax !== null && total !== null && subtotal.add(tax).compare(total) === 0
   );
 }
 
@@ -54,6 +65,10 @@ export async function estimateBuildCost(
     });
   if (!hasConsistentCostCurrency(cost))
     throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
+      contract: 'CostEstimate',
+    });
+  if (!hasConsistentCostTotals(cost))
+    throw new DataError('malformed', 'Cost estimate total does not equal subtotal plus tax.', {
       contract: 'CostEstimate',
     });
   if (!hasCoherentCostCoverage(cost))

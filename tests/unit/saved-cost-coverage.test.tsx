@@ -217,8 +217,8 @@ describe('saved build cost coverage', () => {
         build_id: build.id,
         currency: example.currency,
         period_days: example.days,
-        subtotal: { ...estimate.subtotal, currency: example.currency },
-        tax: { ...estimate.tax, currency: example.currency },
+        subtotal: { ...estimate.subtotal, amount: example.amount, currency: example.currency },
+        tax: { ...estimate.tax, amount: '0', currency: example.currency },
         line_items: estimate.line_items.map((line) => ({
           ...line,
           unit_price: { ...line.unit_price, currency: example.currency },

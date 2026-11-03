@@ -417,7 +417,7 @@ function Pricing() {
             <span className="mono">{'{ "amount": "12.50", "currency": "USD" }'}</span>.{' '}
             {mode === 'fixture'
               ? 'A line amount is quantity × unit rate and is computed without floating-point rounding, so every figure is an estimate and never a quote.'
-              : 'The API returns line amounts and quantities; this site checks currency consistency but does not independently verify the API’s arithmetic.'}
+              : 'The API returns line amounts and quantities; this site checks currencies and that subtotal plus tax equals the total, but does not independently verify line calculations.'}
           </p>
           <p>
             A component with <strong>unknown billing is not established as free</strong>.{' '}

@@ -20,6 +20,7 @@ import { DataError } from '../errors';
 import {
   hasCoherentCostCoverage,
   hasConsistentCostCurrency,
+  hasConsistentCostTotals,
   hasKnownCostSelections,
 } from '../cost-evidence';
 import {
@@ -153,6 +154,7 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
         submittedEvidence.costEstimate &&
         matchesCostEvidence(submitted, submittedEvidence.costEstimate) &&
         hasConsistentCostCurrency(submittedEvidence.costEstimate) &&
+        hasConsistentCostTotals(submittedEvidence.costEstimate) &&
         hasCoherentCostCoverage(submittedEvidence.costEstimate) &&
         hasKnownCostSelections(
           submittedEvidence.costEstimate,
