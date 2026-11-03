@@ -17,7 +17,11 @@ import { BASELINE_GRAPH, BASELINE_RULESET, assertContract, validatorsReady } fro
 import { estimateCost } from '../../domain/cost';
 import { evaluateBuild } from '../../domain/evaluator';
 import { DataError } from '../errors';
-import { hasConsistentCostCurrency } from '../cost-evidence';
+import {
+  hasCoherentCostCoverage,
+  hasConsistentCostCurrency,
+  hasKnownCostSelections,
+} from '../cost-evidence';
 import {
   hasConsistentResourceUnits,
   hasKnownResourceSelections,
@@ -148,7 +152,12 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
       costEstimate:
         submittedEvidence.costEstimate &&
         matchesCostEvidence(submitted, submittedEvidence.costEstimate) &&
-        hasConsistentCostCurrency(submittedEvidence.costEstimate)
+        hasConsistentCostCurrency(submittedEvidence.costEstimate) &&
+        hasCoherentCostCoverage(submittedEvidence.costEstimate) &&
+        hasKnownCostSelections(
+          submittedEvidence.costEstimate,
+          new Set(submitted.selections.map((selection) => selection.id)),
+        )
           ? submittedEvidence.costEstimate
           : null,
       evaluatedAt: this.now(),

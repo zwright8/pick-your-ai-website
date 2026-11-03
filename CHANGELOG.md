@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Reject cost evidence that claims complete coverage while listing unpriced selections, or refers to selections outside the requested build.
 - Keep local capacity checks unknown when multiple qualifying values for the same resource metric cannot be combined reliably, and explain this in the summary.
 - Keep candidate compatibility unknown when a relevant rule remains unresolved, including when the empty-slot baseline is also unknown.
 - Reject compatibility reports for a different build revision or pinned artifacts across analysis, saved builds and comparisons; show retryable errors in analysis and comparison views.

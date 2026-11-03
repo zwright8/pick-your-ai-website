@@ -273,6 +273,31 @@ describe('HTTP evaluation response context', () => {
   );
 });
 
+it.each(['contradictory coverage', 'foreign line'] as const)(
+  'does not use %s cost evidence to pass the local budget rule',
+  async (problem) => {
+    const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
+      monthly_budget_amount: '10000.00',
+    });
+    const cost = await fixture.pricing.estimate(build);
+    const valid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+    expect(
+      valid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+    ).toBe('pass');
+    if (problem === 'contradictory coverage') cost.unpriced_selection_ids = ['sel_model'];
+    else {
+      const line = cost.line_items[0];
+      if (!line) throw new Error('Missing priced fixture line');
+      line.selection_id = 'sel_foreign';
+    }
+    assertContract('CostEstimate', cost);
+    const report = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+    expect(
+      report.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+    ).toBe('unknown');
+  },
+);
+
 it('does not use inconsistent currency evidence for the local budget rule', async () => {
   const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
     monthly_budget_amount: '10000.00',
@@ -397,6 +422,36 @@ it('does not use a foreign pricebook estimate for the local budget rule', async 
 });
 
 describe('HTTP cost response context', () => {
+  it.each([
+    'complete with unpriced selection',
+    'foreign line',
+    'foreign unpriced selection',
+  ] as const)('rejects %s in cost responses and evaluation requests', async (problem) => {
+    const build = pinnedBuild();
+    const cost = await fixture.pricing.estimate(build);
+    if (problem === 'complete with unpriced selection') cost.unpriced_selection_ids = ['sel_model'];
+    if (problem === 'foreign line') {
+      const line = cost.line_items[0];
+      if (!line) throw new Error('Missing priced fixture line');
+      line.selection_id = 'sel_foreign';
+    }
+    if (problem === 'foreign unpriced selection') {
+      cost.coverage = 'partial';
+      cost.unpriced_selection_ids = ['sel_foreign'];
+    }
+    assertContract('CostEstimate', cost);
+    const responseApiMock = responseApi(cost);
+    await expect(providers(responseApiMock).pricing.estimate(build)).rejects.toMatchObject({
+      kind: 'malformed',
+      contract: 'CostEstimate',
+    });
+    const evaluationApiMock = responseApi({});
+    await expect(
+      providers(evaluationApiMock).compatibility.evaluate(build, { costEstimate: cost }),
+    ).rejects.toMatchObject({ kind: 'malformed', contract: 'CostEstimate' });
+    expect(evaluationApiMock).not.toHaveBeenCalled();
+  });
+
   it('accepts a consistent foreign-currency estimate without converting it', async () => {
     const build = pinnedBuild();
     const estimate = structuredClone(await fixture.pricing.estimate(build));

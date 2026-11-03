@@ -15,7 +15,11 @@
 import type { BuildSnapshot, CatalogSnapshot, ComponentKind, ContractName } from '../../contracts';
 import { BASELINE_GRAPH, BASELINE_RULESET } from '../../contracts';
 import { DataError, isDataError } from '../errors';
-import { hasConsistentCostCurrency } from '../cost-evidence';
+import {
+  hasCoherentCostCoverage,
+  hasConsistentCostCurrency,
+  hasKnownCostSelections,
+} from '../cost-evidence';
 import {
   hasConsistentResourceUnits,
   hasKnownResourceSelections,
@@ -177,6 +181,22 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
         contract: 'CostEstimate',
       });
     }
+    if (
+      evidence.costEstimate &&
+      (!hasCoherentCostCoverage(evidence.costEstimate) ||
+        !hasKnownCostSelections(
+          evidence.costEstimate,
+          new Set(build.selections.map((selection) => selection.id)),
+        ))
+    ) {
+      throw new DataError(
+        'malformed',
+        'Cost evidence has inconsistent coverage or selection references.',
+        {
+          contract: 'CostEstimate',
+        },
+      );
+    }
     const { id, revision } = build;
     const locks = { ...build.locks };
     const body: Record<string, unknown> = { build_revision: revision };
@@ -263,6 +283,7 @@ export class HttpPricingProvider implements PricingProvider {
   }
   async estimate(build: BuildSnapshot, periodDays = 30) {
     const { id, revision } = build;
+    const selectionIds = new Set(build.selections.map((selection) => selection.id));
     const pricebookId = build.locks.pricebook_id ?? this.cfg.pricebookId;
     if (!pricebookId) throw new DataError('unsupported', 'Build has no pricebook lock.');
     const { value } = await this.client.contract(
@@ -288,6 +309,15 @@ export class HttpPricingProvider implements PricingProvider {
       throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
         contract: 'CostEstimate',
       });
+    }
+    if (!hasCoherentCostCoverage(value) || !hasKnownCostSelections(value, selectionIds)) {
+      throw new DataError(
+        'malformed',
+        'Cost estimate has inconsistent coverage or selection references.',
+        {
+          contract: 'CostEstimate',
+        },
+      );
     }
     return value;
   }

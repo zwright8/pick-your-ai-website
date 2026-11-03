@@ -41,6 +41,46 @@ describe('cost estimate admission', () => {
     },
   );
 
+  it.each([false, true])(
+    'checks selection IDs against the request-time snapshot (foreign: %s)',
+    async (foreign) => {
+      const build = apiChat();
+      const providers = createFixtureProviders({ now: () => NOW });
+      const original = await providers.pricing.estimate(build);
+      const line = original.line_items[0];
+      if (!line) throw new Error('Missing priced fixture line');
+      let resolveEstimate: ((value: typeof original) => void) | undefined;
+      vi.spyOn(providers.pricing, 'estimate').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveEstimate = resolve;
+          }),
+      );
+      const pending = estimateBuildCost(providers.pricing, build);
+      build.selections = build.selections.map((selection) =>
+        selection.id === line.selection_id ? { ...selection, id: 'sel_changed' } : selection,
+      );
+      if (!resolveEstimate) throw new Error('Estimate was not requested');
+      resolveEstimate(
+        foreign
+          ? {
+              ...original,
+              line_items: original.line_items.map((item) => ({
+                ...item,
+                selection_id: 'sel_changed',
+              })),
+            }
+          : original,
+      );
+      if (foreign)
+        await expect(pending).rejects.toMatchObject({
+          kind: 'malformed',
+          contract: 'CostEstimate',
+        });
+      else await expect(pending).resolves.toEqual(original);
+    },
+  );
+
   it('accepts a consistent foreign-currency estimate without conversion', async () => {
     const build = apiChat();
     const providers = createFixtureProviders({ now: () => NOW });

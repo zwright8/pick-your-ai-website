@@ -16,12 +16,29 @@ export function hasConsistentCostCurrency(cost: CostEstimate): boolean {
   );
 }
 
+/** Complete coverage cannot simultaneously identify unpriced selections. */
+export function hasCoherentCostCoverage(cost: CostEstimate): boolean {
+  return cost.coverage !== 'complete' || cost.unpriced_selection_ids.length === 0;
+}
+
+/** Every priced or unpriced selection must belong to the requested build. */
+export function hasKnownCostSelections(
+  cost: CostEstimate,
+  selectionIds: ReadonlySet<string>,
+): boolean {
+  return (
+    cost.line_items.every((line) => selectionIds.has(line.selection_id)) &&
+    cost.unpriced_selection_ids.every((id) => selectionIds.has(id))
+  );
+}
+
 /** Admit provider estimates only for the requested build and explicit pricebook, in one currency. */
 export async function estimateBuildCost(
   pricing: PricingProvider,
   build: BuildSnapshot,
 ): Promise<CostEstimate> {
   const context = { id: build.id, revision: build.revision, locks: { ...build.locks } };
+  const selectionIds = new Set(build.selections.map((selection) => selection.id));
   const cost = await pricing.estimate(build);
   if (!matchesCostEvidence(context, cost))
     throw new DataError(
@@ -33,6 +50,14 @@ export async function estimateBuildCost(
     );
   if (!hasConsistentCostCurrency(cost))
     throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
+      contract: 'CostEstimate',
+    });
+  if (!hasCoherentCostCoverage(cost))
+    throw new DataError('malformed', 'A complete cost estimate lists unpriced selections.', {
+      contract: 'CostEstimate',
+    });
+  if (!hasKnownCostSelections(cost, selectionIds))
+    throw new DataError('malformed', 'Cost estimate references selections outside this build.', {
       contract: 'CostEstimate',
     });
   return cost;
