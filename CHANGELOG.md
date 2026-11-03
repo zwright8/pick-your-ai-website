@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Keep candidate compatibility unknown when a relevant rule remains unresolved, including when the empty-slot baseline is also unknown.
 - Reject compatibility reports for a different build revision or pinned artifacts across analysis, saved builds and comparisons; show retryable errors in analysis and comparison views.
 - Reject cost estimates for the wrong build, revision or locked pricebook, or with inconsistent currencies, and show unavailable pricing when validation fails.
 - Methodology now distinguishes fixture pricing from API-provided estimates and does not claim the client independently verifies server arithmetic or that HTTP data is entirely synthetic.

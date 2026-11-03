@@ -106,6 +106,14 @@ describe('compatible options', () => {
       expect(o.rule_ids).not.toContain('rule.required.foundation');
   });
 
+  it('keeps a candidate unknown when relevant capacity evidence is unresolved in both comparisons', () => {
+    const verdict = options(selfHosted(), 'model').find(
+      (option) => option.catalog_item_id === item('model', 'open-8b').id,
+    );
+    expect(verdict?.verdict).toBe('unknown');
+    expect(verdict?.rule_ids).toContain('rule.vram.per.device.fit');
+  });
+
   it('still reports a contradiction the candidate introduces', () => {
     const verdicts = new Map(options(contradictory(), 'model').map((o) => [o.catalog_item_id, o]));
     const weightsOnly = verdicts.get(item('model', 'open-8b').id)!;

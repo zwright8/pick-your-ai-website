@@ -72,6 +72,22 @@ function apiChatPicks(): [string, string][] {
 }
 
 describe('catalog selection actions', () => {
+  it('shows unresolved model capacity as unknown after evaluating candidates', async () => {
+    const { client } = show(selfHosted(), '/catalog/model?show=all', 'model');
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryCache()
+          .findAll({ queryKey: ['compat-kind'] })
+          .some((query) => query.state.status === 'success'),
+      ).toBe(true),
+    );
+    const row = await screen.findByRole('row', { name: /Demo Open 8B/ });
+    const compatibility = row.querySelector('[data-label="Compatibility"]');
+    expect(compatibility).toHaveTextContent('Unknown');
+    expect(compatibility).not.toHaveTextContent('Compatible');
+  });
+
   it.each(['sel_workload', 'sel_missing'])(
     'blocks a replacement link targeting the wrong or missing slot (%s)',
     async (target) => {
