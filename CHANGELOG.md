@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Methodology now distinguishes fixture pricing from API-provided estimates and does not claim the client independently verifies server arithmetic or that HTTP data is entirely synthetic.
 - Privacy, About and saved-build screens describe the configured local or API build store and disclose API analysis requests; removing an API-backed build is clearly identified as a local-only removal.
 - Global, home, builder, catalog, component detail, comparison and saved-build labels no longer describe all HTTP-mode data as synthetic demo data; fixture mode retains its demo labels, and synthetic-tagged HTTP records remain identified.
 - Summary and shared views identify names and synthetic labels as belonging to a different current catalog version; summary cost tables use a neutral caption in HTTP mode.

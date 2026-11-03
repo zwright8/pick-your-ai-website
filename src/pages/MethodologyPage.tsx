@@ -399,54 +399,81 @@ function Invalidation() {
 }
 
 function Pricing() {
+  const { mode } = useData();
   return (
     <section className="method-chapter" id="pricing">
       <div className="chapter-index">03 / COST &amp; EVIDENCE</div>
       <h2>Show the math. Show the gaps.</h2>
       <div className="method-split">
         <div>
-          <h3>Illustrative cost baseline</h3>
+          <h3>{mode === 'fixture' ? 'Illustrative cost baseline' : 'Estimated cost baseline'}</h3>
           <p>
-            The amounts in this preview are synthetic monthly scenario placeholders. They are not
-            vendor quotes, and they do not measure token consumption, throughput, reserved capacity,
-            egress or licensing.
+            {mode === 'fixture'
+              ? 'The amounts in this preview are synthetic monthly scenario placeholders. They are not vendor quotes, and they do not measure token consumption, throughput, reserved capacity, egress or licensing.'
+              : 'This deployment requests pricebooks and cost estimates from the configured API. Estimates are not vendor quotes; check their rates, coverage and source dates before relying on them.'}
           </p>
           <p>
             Amounts are decimal strings with a currency, for example{' '}
-            <span className="mono">{'{ "amount": "12.50", "currency": "USD" }'}</span>. A line
-            amount is quantity × unit rate and is computed without floating-point rounding, so every
-            figure is an estimate and never a quote.
+            <span className="mono">{'{ "amount": "12.50", "currency": "USD" }'}</span>.{' '}
+            {mode === 'fixture'
+              ? 'A line amount is quantity × unit rate and is computed without floating-point rounding, so every figure is an estimate and never a quote.'
+              : 'The API returns line amounts and quantities; this site checks currency consistency but does not independently verify the API’s arithmetic.'}
           </p>
           <p>
-            A component with <strong>unknown billing is not free</strong>. It stays unpriced and the
-            estimate&apos;s coverage drops. Coverage is <strong>complete</strong> only when every
-            billable selection has a current, applicable rate; otherwise it is{' '}
-            <strong>partial</strong> or <strong>unknown</strong>, and a budget check cannot pass on
-            partial or stale coverage. No currency conversion is applied, so amounts in different
-            currencies are never summed.
+            A component with <strong>unknown billing is not established as free</strong>.{' '}
+            {mode === 'fixture' ? (
+              <>
+                It stays unpriced and the estimate&apos;s coverage drops. Coverage is{' '}
+                <strong>complete</strong> only when every billable selection has a current,
+                applicable rate; otherwise it is <strong>partial</strong> or{' '}
+                <strong>unknown</strong>, and a budget check cannot pass on partial or stale
+                coverage.
+              </>
+            ) : (
+              <>
+                The API reports coverage as <strong>complete</strong>, <strong>partial</strong> or{' '}
+                <strong>unknown</strong>; the client does not independently establish that every
+                applicable rate was included.
+              </>
+            )}{' '}
+            {mode === 'fixture'
+              ? 'No currency conversion is applied, so amounts in different currencies are never summed.'
+              : 'The client does not convert currencies and rejects estimates that mix them.'}
           </p>
           <p>
-            The in-browser estimator is a provisional preview; the authoritative pricing model is{' '}
+            {mode === 'fixture'
+              ? 'The in-browser estimator is a provisional preview; the authoritative pricing model is '
+              : 'Per-component previews use a provisional in-browser model; the pricing research is '}
             <IssueLink n={39} />.
           </p>
         </div>
         <div className="formula-card">
-          <span>ESTIMATION FRAMEWORK</span>
+          <span>{mode === 'fixture' ? 'ESTIMATION FRAMEWORK' : 'API ESTIMATE'}</span>
           <div className="formula-line">
-            Line amount <b>= quantity × rate</b>
+            Line amount <b>{mode === 'fixture' ? '= quantity × rate' : 'reported by API'}</b>
           </div>
           <div className="formula-line">
-            Unknown billing <b>stays unpriced</b>
+            Unknown billing <b>{mode === 'fixture' ? 'stays unpriced' : 'review coverage'}</b>
           </div>
           <div className="formula-line">
             Coverage <b>complete / partial / unknown</b>
           </div>
           <div className="formula-total">
-            Scenario total <span>= priced lines, one currency</span>
+            Scenario total{' '}
+            <span>{mode === 'fixture' ? '= priced lines, one currency' : 'reported by API'}</span>
           </div>
           <small>
-            Unpriced components are marked <b>Unknown</b>, never silently counted as zero, and
-            amounts in another currency are not converted.
+            {mode === 'fixture' ? (
+              <>
+                Unpriced components are marked <b>Unknown</b>, never silently counted as zero, and
+                amounts in another currency are not converted.
+              </>
+            ) : (
+              <>
+                The API reports unpriced selections and coverage; the client does not independently
+                verify completeness.
+              </>
+            )}
           </small>
         </div>
       </div>
@@ -461,13 +488,14 @@ function Pricing() {
 }
 
 function Evidence() {
+  const { mode } = useData();
   return (
     <section className="method-chapter" id="evidence">
       <div className="chapter-index">04 / PROVENANCE</div>
-      <h2>Every fact carries its source.</h2>
+      <h2>Read the recorded evidence.</h2>
       <p>
-        Each catalog fact records when it was checked and how it was verified. Verification status
-        is one of four values, and an unchecked fact is never presented as verified:
+        Catalog records include provenance entries with check dates and verification statuses. Those
+        statuses are recorded claims, not proof of independent verification:
       </p>
       <dl className="kv">
         <dt className="mono">verified</dt>
@@ -483,7 +511,10 @@ function Evidence() {
         <dt className="mono">unverified</dt>
         <dd>
           No independent verification recorded. This includes source-checked claims without
-          independent support. Every item in this preview is unverified.
+          independent support.{' '}
+          {mode === 'fixture'
+            ? 'Every item in this preview is unverified.'
+            : 'Check the recorded status for each item.'}
         </dd>
       </dl>
       <p>
@@ -494,9 +525,10 @@ function Evidence() {
         open. A newer snapshot alone does not invalidate a pinned build.
       </p>
       <p>
-        Provenance attaches to the catalog snapshot as well as to individual items, so a result can
-        always be traced back to the exact snapshot, ruleset and pricebook revision it was computed
-        from.
+        Catalog items carry provenance, and snapshots record a capture date. Evaluation results
+        identify their catalog snapshot, ruleset and dependency graph; cost estimates identify a
+        pricebook by ID. The estimate does not record a pricebook revision, and an identifier alone
+        does not guarantee that a historical source remains available.
       </p>
     </section>
   );
@@ -508,13 +540,22 @@ function DataSection() {
     <section className="method-chapter" id="data">
       <div className="chapter-index">05 / DATA</div>
       <h2>What this deployment is running.</h2>
-      <p>
-        The real catalog of AI components is still being researched. Until it is published, the site
-        runs in <strong>demo mode</strong>: every component, price, benchmark and compatibility
-        result is <strong>synthetic</strong> and exists only to demonstrate the builder. Demo items
-        use invented names, are marked Synthetic, and must not be read as real products, quotes or
-        measurements.
-      </p>
+      {mode === 'fixture' ? (
+        <p>
+          The real catalog of AI components is still being researched. Until it is published, the
+          site runs in <strong>demo mode</strong>: every component, price, benchmark and
+          compatibility result is <strong>synthetic</strong> and exists only to demonstrate the
+          builder. Demo items use invented names, are marked Synthetic, and must not be read as real
+          products, quotes or measurements.
+        </p>
+      ) : (
+        <p>
+          This deployment uses a configured API for catalog data and analysis. Records tagged
+          Synthetic are examples; for other records, inspect the recorded provenance and
+          verification status before relying on them. A source date alone does not establish
+          currentness.
+        </p>
+      )}
       <p>
         The data source is chosen at build time with <span className="mono">VITE_DATA_MODE</span>:{' '}
         <span className="mono">fixture</span> (synthetic demo data bundled with the site) or{' '}
@@ -551,6 +592,7 @@ function DataSection() {
 }
 
 function Limits() {
+  const { mode } = useData();
   return (
     <section className="method-chapter" id="limits">
       <div className="chapter-index">06 / LIMITATIONS</div>
@@ -578,9 +620,18 @@ function Limits() {
         <div>
           <span>03</span>
           <p>
-            <strong>Not live billing data.</strong> Example costs exist only to demonstrate
-            presentation and comparison workflows. There is no pricing feed, no vendor quote and no
-            currency conversion.
+            {mode === 'fixture' ? (
+              <>
+                <strong>Not live billing data.</strong> Example costs exist only to demonstrate
+                presentation and comparison workflows. There is no pricing feed, no vendor quote and
+                no currency conversion.
+              </>
+            ) : (
+              <>
+                <strong>Not a billing statement.</strong> API estimates are not proof of current
+                billing or a vendor quote. The site does not apply currency conversion.
+              </>
+            )}
           </p>
         </div>
         <div>
@@ -612,6 +663,7 @@ function Limits() {
 }
 
 export default function MethodologyPage() {
+  const { mode } = useData();
   return (
     <>
       <div className="page-masthead method-head">
@@ -646,7 +698,7 @@ export default function MethodologyPage() {
           <div className="eyebrow">ON THIS PAGE</div>
           {SECTIONS.map((section) => (
             <a href={`#${section.id}`} key={section.id}>
-              {section.label}
+              {section.id === 'data' && mode === 'http' ? 'Data source' : section.label}
             </a>
           ))}
           <div className="method-toc-note">
