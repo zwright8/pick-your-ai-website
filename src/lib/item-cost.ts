@@ -153,7 +153,7 @@ export function itemPrice(
   );
   const meters = lines.map((line) => line.meter.replace(/_/g, ' ')).join(', ');
   const note = unpriced
-    ? `Lower bound · ${lines.length} of this component's meters priced (${meters}); at least one meter has no applicable rate.`
+    ? `Lower bound · ${lines.length} of this component's meters priced (${meters}); at least one meter has no applicable rate or cannot be resolved.`
     : `Example / ${estimate.period_days} days (${meters})`;
 
   return {

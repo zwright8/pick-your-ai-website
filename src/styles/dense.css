@@ -1174,6 +1174,9 @@ html.light .pstatus {
 html.light .pstatus {
   background: #f6fbf9;
 }
+html.light .pstat-value.is-unknown {
+  color: #7a4d13;
+}
 html.light .pstatus-pass {
   background: #e6f4ee;
   border-right-color: #9ecdc0;

@@ -80,6 +80,23 @@ describe('itemPrice pricebook lock', () => {
 });
 
 describe('itemPrice aggregates every applicable meter', () => {
+  it('shows a lower bound when one meter has competing active rates', () => {
+    const large = item('model', 'aurora-large');
+    const input = PRICEBOOK.rates.find(
+      (rate) => rate.catalog_item_id === large.id && rate.meter === 'input_tokens_1m',
+    );
+    if (!input) throw new Error('Missing input rate fixture');
+    const conflicting = {
+      ...PRICEBOOK,
+      rates: [...PRICEBOOK.rates, { ...input, id: 'rate.demo.competing-input' }],
+    };
+    const price = itemPrice(large, build, BY_ID, conflicting);
+    expect(price.partial).toBe(true);
+    expect(price.label).toMatch(/^≥ /);
+    expect(price.amount).toBe('216.00');
+    expect(price.note).toMatch(/cannot be resolved/);
+  });
+
   it('sums both token meters of a model that has two valid rates', () => {
     const large = item('model', 'aurora-large');
     const price = itemPrice(large, build, BY_ID, PRICEBOOK);

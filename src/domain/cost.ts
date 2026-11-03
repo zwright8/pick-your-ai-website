@@ -175,13 +175,29 @@ export function estimateCost(
       warnings.push(`${sel.id}: no rate for ${item.name} in pricebook ${pricebook.id}.`);
       continue;
     }
-    for (const r of candidates) {
-      const problem = rateApplies(r, sel, build, now);
-      if (problem) {
+    const meters = new Map<Meter, Pricebook['rates']>();
+    for (const rate of candidates) {
+      const group = meters.get(rate.meter) ?? [];
+      group.push(rate);
+      meters.set(rate.meter, group);
+    }
+    for (const [meter, rates] of meters) {
+      const applicable = rates.filter((rate) => !rateApplies(rate, sel, build, now));
+      if (applicable.length === 0) {
         unpriced.add(sel.id);
-        warnings.push(`${sel.id}: rate ${r.id} not applicable (${problem}).`);
+        const reasons = rates.map((rate) => `${rate.id}: ${rateApplies(rate, sel, build, now)}`);
+        warnings.push(`${sel.id}: no applicable rate for ${meter} (${reasons.join('; ')}).`);
         continue;
       }
+      if (applicable.length !== 1 || applicable[0]?.conditions?.length) {
+        unpriced.add(sel.id);
+        warnings.push(
+          `${sel.id}: conflicting or conditional rates for ${meter} cannot be resolved by the preview estimator.`,
+        );
+        continue;
+      }
+      const r = applicable[0];
+      if (!r) continue;
       const p = project(r.meter, sel, item, build, periodDays);
       if (typeof p === 'string') {
         unpriced.add(sel.id);

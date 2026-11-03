@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Leave conflicting or conditional preview price rates unpriced instead of adding unresolvable quotes together; ignore expired alternatives when a current rate for the same meter applies.
+- Improve light-theme contrast for unknown and partial values in the builder status strip.
+
 - Scope `@typescript-eslint/typescript-estree` to `minimatch` 11.0.1 for the affected development-tooling path in [#338](https://github.com/Pick-Your-AI/pick-your-ai-website/issues/338). Remove the override when a compatible upstream release supplies a patched dependency. The separate ESLint 3.x path remains in the advisory inventory; this is a partial remediation.
 
 - **Builder, catalog and compare rebuilt on a dense "parts list" layer** (`src/styles/dense.css`, `src/components/parts.tsx`) modelled on the PCPartPicker interaction patterns recorded in `docs/research/pcpartpicker-ux-notes.md`: fixed component rows in dependency order with "Choose …" empty states, a status strip carrying the worst outcome plus live estimates, a running total under the table, lettered findings with severity and outcome as words, an explicit "what was not checked" note, a compatibility filter that is on by default with `unknown` as its own bucket, `aria-sort` table headers, active-filter chips, and URL-carried filter state.
