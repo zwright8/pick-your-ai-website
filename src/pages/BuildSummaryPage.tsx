@@ -30,6 +30,7 @@ import { PageHeader } from '../components/layout';
 import { OutcomeBadge, SyntheticBadge } from '../components/status';
 import { buildMarkdown, download } from '../features/builder/BuildToolbar';
 import { ExportWarning, type ExportWarningData } from '../features/builds/ExportWarning';
+import { ExportFailure, type ExportFailureData } from '../features/builds/ExportFailure';
 import { incompleteBuild } from '../features/builder/incomplete';
 import { costHeadline, flaggedFindings, formatMoney, overall } from '../features/builder/analysis';
 import { CostTotals } from '../components/parts';
@@ -54,7 +55,12 @@ function selectionLabel(
 
 export default function BuildSummaryPage() {
   const [exportWarning, setExportWarning] = useState<ExportWarningData | null>(null);
+  const [exportFailure, setExportFailure] = useState<
+    (ExportFailureData & { target: 'json' | 'markdown' }) | null
+  >(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const markdownExportRef = useRef<HTMLButtonElement>(null);
+  const exportAttempt = useRef(0);
   useValidatorsReady(); // re-render once export validation is possible
   const { draft, ready } = useBuilder();
   const { mode } = useData();
@@ -62,6 +68,11 @@ export default function BuildSummaryPage() {
   const ruleset = useRuleset();
   const build = draft?.build;
   const analysis = useBuildAnalysis(build);
+  const [exportBuildId, setExportBuildId] = useState(build?.id);
+  if (exportBuildId !== build?.id) {
+    setExportBuildId(build?.id);
+    setExportFailure(null);
+  }
 
   if (catalog.isError) {
     return (
@@ -122,30 +133,55 @@ export default function BuildSummaryPage() {
             disabled={Boolean(exportProblem)}
             aria-describedby={exportProblem ? 'export-problem' : undefined}
             onClick={() => {
-              const filename = exportFileName(build);
-              const json = exportBuildJson(build, mode);
-              download(filename, json);
-              const problem = exportFileImportProblem(json);
-              if (problem) setExportWarning({ filename, problem });
+              const attempt = ++exportAttempt.current;
+              try {
+                const filename = exportFileName(build);
+                const json = exportBuildJson(build, mode);
+                const problem = exportFileImportProblem(json);
+                download(filename, json);
+                setExportFailure(null);
+                if (problem) setExportWarning({ filename, problem });
+              } catch {
+                setExportFailure({ message: 'Please try again.', attempt, target: 'json' });
+              }
             }}
           >
             <Icon name="download" /> Export JSON
           </button>
           <button
+            ref={markdownExportRef}
             type="button"
             className="btn btn-outline btn-small"
             disabled={!build.selections.length}
-            onClick={() =>
-              download(
-                exportFileName(build).replace(/\.json$/, '.md'),
-                buildMarkdown(build, byId, mode),
-                'text/markdown',
-              )
-            }
+            onClick={() => {
+              const attempt = ++exportAttempt.current;
+              try {
+                download(
+                  exportFileName(build).replace(/\.json$/, '.md'),
+                  buildMarkdown(build, byId, mode),
+                  'text/markdown',
+                );
+                setExportFailure(null);
+              } catch {
+                setExportFailure({ message: 'Please try again.', attempt, target: 'markdown' });
+              }
+            }}
           >
             <Icon name="download" /> Export Markdown
           </button>
         </div>
+        {exportFailure ? (
+          <div className="no-print">
+            <ExportFailure
+              failure={exportFailure}
+              onDismiss={() => {
+                const ref = exportFailure.target === 'json' ? exportRef : markdownExportRef;
+                setExportFailure(null);
+                requestAnimationFrame(() => ref.current?.focus());
+              }}
+            />
+          </div>
+        ) : null}
         {exportWarning ? (
           <div className="no-print">
             <ExportWarning

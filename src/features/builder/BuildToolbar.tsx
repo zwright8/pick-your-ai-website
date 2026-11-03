@@ -8,13 +8,17 @@ import { KIND_LABELS, TIERS, TIER_LABELS, kindsInTier } from '../../contracts';
 /** Triggers a client-side file download (no server round trip). */
 export function download(name: string, text: string, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  let a: HTMLAnchorElement | undefined;
+  try {
+    a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+  } finally {
+    a?.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 /** Keep user and catalog text literal and confined to one Markdown line or table cell. */

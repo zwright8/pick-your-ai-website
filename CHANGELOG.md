@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Keep export failures visible in the builder and summary, and clean up temporary download links if the browser rejects an export.
 - Keep share failures visible until dismissed or a retry succeeds, and preserve feedback when clipboard attempts overlap.
 - Refresh repeated toast announcements and clear expired messages from the accessibility tree.
 - Make summary and shared-build warning paragraphs readable at narrow widths without changing compact severity badges.

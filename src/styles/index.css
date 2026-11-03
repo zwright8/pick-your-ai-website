@@ -127,11 +127,13 @@ h1[tabindex='-1']:focus-visible {
   --notice-control-height: 2.5rem;
 }
 .export-warning,
-.share-warning {
+.share-warning,
+.export-failure {
   margin: var(--notice-gap) 0;
 }
 .export-warning p,
 .share-warning p,
+.export-failure p,
 .saved-card .export-warning p,
 html.light .saved-card .export-warning p {
   margin: 0 0 var(--notice-content-gap);
@@ -140,7 +142,8 @@ html.light .saved-card .export-warning p {
   overflow-wrap: anywhere;
 }
 .export-warning .btn,
-.share-warning .btn {
+.share-warning .btn,
+.export-failure .btn {
   min-height: var(--notice-control-height);
   font-size: var(--notice-text-size);
 }

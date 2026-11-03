@@ -59,6 +59,7 @@ import { ObjectivesForm } from './ObjectivesForm';
 import { SettingsForm } from './SettingsForm';
 import { BuilderLoading, builderDescription } from './BuilderLoading';
 import { ExportWarning, type ExportWarningData } from '../builds/ExportWarning';
+import { ExportFailure, type ExportFailureData } from '../builds/ExportFailure';
 
 function GroupRow({
   tier,
@@ -367,7 +368,9 @@ export default function BuilderPage() {
   const [configureError, setConfigureError] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [exportWarning, setExportWarning] = useState<ExportWarningData | null>(null);
+  const [exportFailure, setExportFailure] = useState<ExportFailureData | null>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const exportAttempt = useRef(0);
   const [shareError, setShareError] = useState<{ message: string; attempt: number } | null>(null);
   const [shareBuildId, setShareBuildId] = useState(build?.id);
   const shareRef = useRef<HTMLButtonElement>(null);
@@ -380,6 +383,7 @@ export default function BuilderPage() {
   if (shareBuildId !== build?.id) {
     setShareBuildId(build?.id);
     setShareError(null);
+    setExportFailure(null);
   }
   useLayoutEffect(() => {
     shareAttempt.current++;
@@ -492,17 +496,23 @@ export default function BuilderPage() {
   };
 
   const exportJson = () => {
-    const problem = canExport(build);
-    if (problem) {
-      toast(problem);
-      return;
+    const attempt = ++exportAttempt.current;
+    try {
+      const problem = canExport(build);
+      if (problem) {
+        setExportFailure({ message: problem, attempt });
+        return;
+      }
+      const json = exportBuildJson(build, mode);
+      const filename = exportFileName(build);
+      const importProblem = exportFileImportProblem(json);
+      download(filename, json);
+      setExportFailure(null);
+      if (importProblem) setExportWarning({ filename, problem: importProblem });
+      else toast('Configuration exported as JSON.');
+    } catch {
+      setExportFailure({ message: 'Please try again.', attempt });
     }
-    const json = exportBuildJson(build, mode);
-    const filename = exportFileName(build);
-    download(filename, json);
-    const importProblem = exportFileImportProblem(json);
-    if (importProblem) setExportWarning({ filename, problem: importProblem });
-    else toast('Configuration exported as JSON.');
   };
 
   const share = async () => {
@@ -659,6 +669,16 @@ export default function BuilderPage() {
               Dismiss sharing warning
             </button>
           </div>
+        ) : null}
+
+        {exportFailure ? (
+          <ExportFailure
+            failure={exportFailure}
+            onDismiss={() => {
+              setExportFailure(null);
+              requestAnimationFrame(() => exportRef.current?.focus());
+            }}
+          />
         ) : null}
 
         {exportWarning ? (
