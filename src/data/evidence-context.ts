@@ -30,6 +30,35 @@ export function hasKnownResourceSelections(
   );
 }
 
+const CONFIDENCE_RANK = { unverified: 0, estimated: 1, calibrated: 2, verified: 3 } as const;
+
+/** Multiple qualified estimates cannot be reduced to a single metric without choosing arbitrarily. */
+export function ambiguousResourceMetrics(
+  build: Pick<BuildSnapshot, 'policy'>,
+  resource: ResourceEstimate,
+): ReadonlySet<ResourceEntry['metric']> {
+  const minimum = CONFIDENCE_RANK[build.policy?.min_resource_confidence ?? 'calibrated'];
+  const seen = new Set<ResourceEntry['metric']>();
+  const ambiguous = new Set<ResourceEntry['metric']>();
+  for (const entry of resource.estimates) {
+    if (CONFIDENCE_RANK[entry.confidence] < minimum) continue;
+    if (seen.has(entry.metric)) ambiguous.add(entry.metric);
+    seen.add(entry.metric);
+  }
+  return ambiguous;
+}
+
+/** Avoid the local reference interpreter's first-qualified-value behavior when evidence is ambiguous. */
+export function unambiguousResourceEvidence(
+  build: Pick<BuildSnapshot, 'policy'>,
+  resource: ResourceEstimate,
+): ResourceEstimate | null {
+  const ambiguous = ambiguousResourceMetrics(build, resource);
+  if (!ambiguous.size) return resource;
+  const estimates = resource.estimates.filter((entry) => !ambiguous.has(entry.metric));
+  return estimates.length ? { ...resource, estimates } : null;
+}
+
 /** Admit evidence only for the build revision it describes. */
 export function matchesBuildEvidence(
   build: Pick<BuildSnapshot, 'id' | 'revision'>,

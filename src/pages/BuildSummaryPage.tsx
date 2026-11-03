@@ -1,3 +1,4 @@
+import { ambiguousResourceMetrics } from '../data/evidence-context';
 import type { ComponentKind } from '../contracts';
 /*
  * Full, printable summary of the current draft: locks, selections by tier, objectives, findings,
@@ -460,6 +461,12 @@ export default function BuildSummaryPage() {
             ) : resources.status === 'available' ? (
               <>
                 <p>Estimator evidence for revision {resources.estimate.build_revision}:</p>
+                {mode === 'fixture' && ambiguousResourceMetrics(build, resources.estimate).size ? (
+                  <p className="severity severity-warning">
+                    Multiple qualifying estimates for the same metric are not used in local demo
+                    compatibility checks because they cannot be combined reliably.
+                  </p>
+                ) : null}
                 <ul>
                   {resources.estimate.estimates.map((e, i) => (
                     <li key={i}>

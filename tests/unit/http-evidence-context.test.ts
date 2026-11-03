@@ -309,6 +309,56 @@ it.each([
   },
 );
 
+it.each([false, true])(
+  'keeps a conflicting duplicate metric unknown regardless of order (reverse: %s)',
+  async (reverse) => {
+    const build = selfHosted();
+    const resource = resourceEstimate(build, '20', 'calibrated');
+    const metric = resource.estimates.find(
+      (entry) => entry.metric === 'inference.estimated_required_vram_gb',
+    );
+    if (!metric) throw new Error('Missing metric');
+    resource.estimates.push({ ...metric, value: '200' });
+    if (reverse) resource.estimates.reverse();
+    assertContract('ResourceEstimate', resource);
+    const report = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+    expect(
+      report.findings.find((finding) => finding.rule_id === 'rule.vram.estimate.fit')?.outcome,
+    ).toBe('unknown');
+    expect(
+      report.findings.find((finding) => finding.rule_id === 'rule.vram.per.device.fit')?.outcome,
+    ).toBe('pass');
+  },
+);
+
+it('withholds an entirely ambiguous resource document without changing the input', async () => {
+  const build = selfHosted();
+  const resource = resourceEstimate(build, '20', 'calibrated');
+  const metric = resource.estimates[0];
+  if (!metric) throw new Error('Missing metric');
+  resource.estimates = [metric, { ...metric }];
+  const before = structuredClone(resource);
+  const report = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+  expect(
+    report.findings.find((finding) => finding.rule_id === 'rule.vram.estimate.fit')?.outcome,
+  ).toBe('unknown');
+  expect(resource).toEqual(before);
+});
+
+it('retains a single qualified metric when another estimate is below the confidence threshold', async () => {
+  const build = selfHosted();
+  const resource = resourceEstimate(build, '20', 'calibrated');
+  const metric = resource.estimates.find(
+    (entry) => entry.metric === 'inference.estimated_required_vram_gb',
+  );
+  if (!metric) throw new Error('Missing metric');
+  resource.estimates.unshift({ ...metric, value: '200', confidence: 'estimated' });
+  const report = await fixture.compatibility.evaluate(build, { resourceEstimate: resource });
+  expect(
+    report.findings.find((finding) => finding.rule_id === 'rule.vram.estimate.fit')?.outcome,
+  ).toBe('pass');
+});
+
 it.each([
   ['a nonexistent selection', ['sel_nonexistent']],
   ['no selections', []],

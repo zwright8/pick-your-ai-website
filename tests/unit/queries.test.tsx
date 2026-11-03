@@ -20,7 +20,7 @@ import type { ResourceEstimateResult } from '../../src/data/types';
 import { createDraft, updateObjectives } from '../../src/domain/build';
 import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import BuildSummaryPage from '../../src/pages/BuildSummaryPage';
-import { BY_ID, NOW, apiChat, buildWith, resourceEstimate } from './scenarios';
+import { BY_ID, NOW, apiChat, buildWith, resourceEstimate, selfHosted } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
 
@@ -105,6 +105,54 @@ async function analysisHarness() {
 }
 
 describe('build analysis identity', () => {
+  it('explains ambiguous capacity evidence while withholding it from the affected local rule', async () => {
+    const build = selfHosted();
+    const providers = createFixtureProviders({ now: () => NOW });
+    const estimate = resourceEstimate(build, '20', 'calibrated');
+    const metric = estimate.estimates[0];
+    if (!metric) throw new Error('Missing metric');
+    estimate.estimates.push({ ...metric, value: '200' });
+    vi.spyOn(providers.resources, 'estimate').mockResolvedValue({ status: 'available', estimate });
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: createDraft(build),
+      ready: true,
+      catalogById: BY_ID,
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const wrapper = wrapperFor(providers, client);
+    const hook = renderHook(() => useBuildAnalysis(build), { wrapper });
+    await waitFor(() => expect(hook.result.current.resources?.status).toBe('available'));
+    await waitFor(() => {
+      expect(hook.result.current.reportIsCurrent).toBe(true);
+      expect(
+        hook.result.current.report?.findings.find(
+          (finding) => finding.rule_id === 'rule.vram.estimate.fit',
+        )?.outcome,
+      ).toBe('unknown');
+      expect(
+        hook.result.current.report?.findings.find(
+          (finding) => finding.rule_id === 'rule.vram.per.device.fit',
+        )?.outcome,
+      ).toBe('pass');
+    });
+    const view = render(<BuildSummaryPage />, { wrapper });
+    const capacity = await screen.findByRole('region', { name: 'Capacity evidence' });
+    expect(capacity).toHaveTextContent(
+      'Multiple qualifying estimates for the same metric are not used',
+    );
+    expect(capacity).toHaveTextContent('20 gb');
+    expect(capacity).toHaveTextContent('200 gb');
+    view.unmount();
+    hook.unmount();
+    client.clear();
+  });
+
   it.each([
     'build_id',
     'build_revision',

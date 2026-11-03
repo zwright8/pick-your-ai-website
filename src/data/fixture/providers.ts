@@ -23,6 +23,7 @@ import {
   hasKnownResourceSelections,
   matchesBuildEvidence,
   matchesCostEvidence,
+  unambiguousResourceEvidence,
 } from '../evidence-context';
 import { LocalBuildRepository } from '../local-builds';
 import {
@@ -142,7 +143,7 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
           submittedEvidence.resourceEstimate,
           new Set(submitted.selections.map((selection) => selection.id)),
         )
-          ? submittedEvidence.resourceEstimate
+          ? unambiguousResourceEvidence(submitted, submittedEvidence.resourceEstimate)
           : null,
       costEstimate:
         submittedEvidence.costEstimate &&
