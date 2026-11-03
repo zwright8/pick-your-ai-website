@@ -464,6 +464,17 @@ html.light .modal .field-error {
   line-height: 1.7;
   color: var(--muted);
 }
+.panel p.severity-warning {
+  display: block;
+  color: var(--orange);
+  font: 500 14px/1.55 var(--body);
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+html.light .panel p.severity-warning {
+  color: #7a4d13;
+}
 html.light .panel {
   background: #fff;
 }
