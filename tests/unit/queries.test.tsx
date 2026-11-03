@@ -105,6 +105,50 @@ async function analysisHarness() {
 }
 
 describe('build analysis identity', () => {
+  it.each([
+    'build_id',
+    'build_revision',
+    'catalog_snapshot_id',
+    'ruleset_id',
+    'ruleset_version',
+    'dependency_graph_id',
+    'dependency_graph_revision',
+  ] as const)('rejects a report with a mismatched %s', async (field) => {
+    const h = await analysisHarness();
+    const invalid = structuredClone(h.report);
+    if (field === 'build_revision') invalid.build_revision += 1;
+    else if (field === 'dependency_graph_revision') invalid.dependency_graph_revision += 1;
+    else invalid[field] = 'foreign';
+    h.evaluate.mockResolvedValue(invalid);
+    await act(async () => {
+      await h.result.current.evaluation.refetch();
+    });
+    await waitFor(() => expect(h.result.current.evaluationError).toBe(true));
+    expect(h.result.current.reportIsCurrent).toBe(false);
+    if (field === 'ruleset_id') {
+      vi.mocked(useBuilder).mockReturnValue({
+        draft: createDraft(h.build),
+        ready: true,
+        catalogById: BY_ID,
+        lastChange: null,
+        saveState: { status: 'saved' },
+        apply: vi.fn(),
+        startNew: vi.fn(),
+        open: vi.fn(),
+        restore: vi.fn(),
+      });
+      const view = render(<BuildSummaryPage />, { wrapper: h.wrapper });
+      await screen.findByText(
+        'Evaluation report does not match the build or its pinned artifacts.',
+      );
+      h.evaluate.mockResolvedValue(h.report);
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
+      view.unmount();
+    }
+    h.unmount();
+  });
+
   it.each(['wrong build', 'wrong revision', 'wrong pricebook', 'mixed currency'] as const)(
     'rejects %s cost evidence and shows an unavailable state',
     async (problem) => {

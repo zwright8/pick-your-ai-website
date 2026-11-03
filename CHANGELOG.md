@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Reject compatibility reports for a different build revision or pinned artifacts across analysis, saved builds and comparisons; show retryable errors in analysis and comparison views.
 - Reject cost estimates for the wrong build, revision or locked pricebook, or with inconsistent currencies, and show unavailable pricing when validation fails.
 - Methodology now distinguishes fixture pricing from API-provided estimates and does not claim the client independently verifies server arithmetic or that HTTP data is entirely synthetic.
 - Privacy, About and saved-build screens describe the configured local or API build store and disclose API analysis requests; removing an API-backed build is clearly identified as a local-only removal.

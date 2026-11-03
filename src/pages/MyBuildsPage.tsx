@@ -1,3 +1,4 @@
+import { evaluateBuild } from '../data/evaluation-evidence';
 /*
  * My Builds (mock: `#buildsScreen` + `renderBuildsPage()` and the `data-saved-action` handlers).
  *
@@ -154,10 +155,7 @@ export default function MyBuildsPage() {
         enabled: Boolean(build) && Boolean(costQuery && !costQuery.isPending),
         queryFn: async () => {
           if (!build) throw new Error('Saved build is not available.');
-          const report = await compatibility.evaluate(build, { costEstimate: cost ?? null });
-          if (report.build_id !== build.id || report.build_revision !== build.revision)
-            throw new Error('Evaluation does not match the saved build.');
-          return report;
+          return evaluateBuild(compatibility, build, { costEstimate: cost ?? null });
         },
       };
     }),

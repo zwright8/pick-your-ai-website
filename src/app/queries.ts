@@ -9,6 +9,7 @@ import type { BuildSnapshot, CatalogItem, ComponentKind } from '../contracts';
 import { estimateBuildCost } from '../data/cost-evidence';
 import { hasConsistentResourceUnits, hasKnownResourceSelections } from '../data/evidence-context';
 import { DataError } from '../data/errors';
+import { evaluateBuild } from '../data/evaluation-evidence';
 import { useData } from './data-context';
 
 export function useCatalog() {
@@ -119,11 +120,13 @@ export function useBuildAnalysis(build: BuildSnapshot | null | undefined) {
       : null;
   const evaluation = useQuery({
     queryKey: ['evaluation', ...buildKey(build), costReady ? cost.data : null, resourceEstimate],
-    queryFn: () =>
-      data.compatibility.evaluate(build!, {
+    queryFn: () => {
+      if (!build) throw new DataError('not_found', 'No build is available.');
+      return evaluateBuild(data.compatibility, build, {
         costEstimate: costReady ? cost.data : null,
         resourceEstimate,
-      }),
+      });
+    },
     enabled: enabled && !cost.isPending,
     placeholderData: keepPreviousData,
     retry: 1,

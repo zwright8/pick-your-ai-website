@@ -1,3 +1,4 @@
+import { evaluateBuild } from '../data/evaluation-evidence';
 /*
  * Compare.
  *
@@ -820,7 +821,7 @@ function useSideAnalysis(build: BuildSnapshot) {
   const { compatibility, pricing } = useData();
   const evaluation = useQuery({
     queryKey: ['compare', 'evaluation', build.id, build.revision, build],
-    queryFn: () => compatibility.evaluate(build),
+    queryFn: () => evaluateBuild(compatibility, build),
   });
   const cost = useQuery({
     queryKey: ['compare', 'cost', build.id, build.revision, build],
@@ -1294,7 +1295,10 @@ function OutcomeDiff({
     );
   }
   return (
-    <section aria-labelledby="outcome-diff-heading" aria-busy={!ra || !rb}>
+    <section
+      aria-labelledby="outcome-diff-heading"
+      aria-busy={!left.isError && !right.isError && (!ra || !rb)}
+    >
       <h2 id="outcome-diff-heading" className="parts-h2">
         Compatibility outcomes
       </h2>
@@ -1406,7 +1410,10 @@ function CostDiff({
     );
   }
   return (
-    <section aria-labelledby="cost-diff-heading" aria-busy={!ca || !cb}>
+    <section
+      aria-labelledby="cost-diff-heading"
+      aria-busy={!left.isError && !right.isError && (!ca || !cb)}
+    >
       <h2 id="cost-diff-heading" className="parts-h2">
         Estimated cost
       </h2>

@@ -52,6 +52,46 @@ const unpricedStack = () =>
   ]);
 
 describe('saved build cost coverage', () => {
+  it('withholds validation from a report pinned to another ruleset', async () => {
+    mockBuilder(null);
+    const providers = createFixtureProviders({ now: () => NOW });
+    const build = apiChat();
+    await providers.builds.save(createDraft(build), null);
+    const evaluate = providers.compatibility.evaluate.bind(providers.compatibility);
+    const evaluator = vi
+      .spyOn(providers.compatibility, 'evaluate')
+      .mockImplementation(async (b, evidence) => ({
+        ...(await evaluate(b, evidence)),
+        ruleset_id: 'ruleset.foreign',
+      }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <ToastProvider>
+              <MyBuildsPage />
+            </ToastProvider>
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByRole('article');
+    await waitFor(() => expect(evaluator).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        client
+          .getQueryCache()
+          .findAll({ queryKey: ['builds', 'detail-report'] })
+          .some((query) => query.state.status === 'error'),
+      ).toBe(true),
+    );
+    expect(card).toHaveTextContent('Not checked');
+    expect(card).not.toHaveTextContent('Validated');
+    view.unmount();
+    client.clear();
+  });
+
   it.each(['wrong pricebook', 'mixed currency'] as const)(
     'does not show a saved estimate with %s',
     async (problem) => {

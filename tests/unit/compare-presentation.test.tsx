@@ -332,6 +332,26 @@ describe('component comparison', () => {
 });
 
 describe('evaluation coverage and build comparison structure', () => {
+  it('rejects a mismatched report and allows comparison to recover', async () => {
+    let invalid = true;
+    show('/compare?revisions=1,2', false, false, undefined, undefined, false, (providers) => {
+      const evaluate = providers.compatibility.evaluate.bind(providers.compatibility);
+      vi.spyOn(providers.compatibility, 'evaluate').mockImplementation(async (build, evidence) => {
+        const report = await evaluate(build, evidence);
+        return invalid && build.revision === 1 ? { ...report, ruleset_id: 'foreign' } : report;
+      });
+    });
+    const section = await screen.findByRole('region', { name: 'Compatibility outcomes' });
+    await within(section).findByText(
+      'Evaluation report does not match the build or its pinned artifacts.',
+    );
+    expect(section).toHaveAttribute('aria-busy', 'false');
+    expect(within(section).queryByRole('table')).not.toBeInTheDocument();
+    invalid = false;
+    await userEvent.click(within(section).getByRole('button', { name: 'Try again' }));
+    await within(section).findByRole('table', { name: 'Number of checks per outcome for A and B' });
+  });
+
   it('labels a current catalog name when both revisions pin an older component', async () => {
     const base = apiChat();
     const first = {
