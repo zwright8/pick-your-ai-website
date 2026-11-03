@@ -1,11 +1,12 @@
 /*
  * About. Structure, copy and class names are ported from the approved design mock
  * (`docs/design/pickyourai-complete.html`, `#aboutScreen`). The mock's roadmap and FAQ answers are design
- * placeholders; the answers here describe what this build actually does (synthetic data, local-only
- * builds, no account, no live pricing) and link to the real project repositories.
+ * placeholders; the answers describe the configured data and storage modes and link to the real
+ * project repositories.
  */
 import { Link } from 'react-router';
 import { Icon, type IconName } from '../components/icon';
+import { useData } from '../app/data-context';
 
 const ORG = 'https://github.com/Pick-Your-AI';
 const SITE_REPO = `${ORG}/pickyour.ai`;
@@ -61,6 +62,7 @@ const ROADMAP = [
 ];
 
 export default function AboutPage() {
+  const { mode, buildStore } = useData();
   return (
     <>
       <div className="page-masthead about-masthead">
@@ -130,9 +132,11 @@ export default function AboutPage() {
             <span className="eyebrow">THE PATH FORWARD</span>
             <h2>From preview to decision platform.</h2>
             <p>
-              This experience is a front-end concept running on synthetic demo data. A production
-              release requires a continuously maintained evidence catalog and verified integration
-              rules — see{' '}
+              {mode === 'fixture'
+                ? 'This experience is a front-end concept running on synthetic demo data. '
+                : 'This deployment uses a configured API for catalog data and analysis. '}
+              A production release requires a continuously maintained evidence catalog and verified
+              integration rules — see{' '}
               <Link className="text-link" to="/methodology#data">
                 what this deployment is running
               </Link>
@@ -160,10 +164,11 @@ export default function AboutPage() {
           <details>
             <summary>Does the preview validate real hardware or software compatibility?</summary>
             <p>
-              No. The checker evaluates the published baseline ruleset against synthetic demo items,
-              so it demonstrates how rule-based dependencies are surfaced — not a continuously
-              researched support matrix. When the evidence for a check is missing the result is
-              reported as unknown, never as compatible. Read the{' '}
+              {mode === 'fixture'
+                ? 'No. The checker evaluates the published baseline ruleset against synthetic demo items, not a continuously researched support matrix. '
+                : 'Checks use recorded catalog evidence and the configured API; they are not proof of real-world support. '}
+              When the evidence for a check is missing the result is reported as unknown, never as
+              compatible. Read the{' '}
               <Link className="text-link" to="/methodology#compatibility">
                 methodology
               </Link>{' '}
@@ -173,25 +178,31 @@ export default function AboutPage() {
           <details>
             <summary>Are the prices and benchmarks live?</summary>
             <p>
-              No. Every amount is a synthetic monthly placeholder, not a vendor quote, and there is
-              no benchmark or pricing feed. Components without a rate are shown as{' '}
-              <strong>Unknown</strong> rather than as zero, and amounts in different currencies are
-              never converted or summed.
+              {mode === 'fixture'
+                ? 'No. Amounts use synthetic demo prices, not a vendor quote or a live feed. '
+                : 'Estimates use data from the configured API; they are not vendor quotes or proof that prices are current. '}
+              Components without a rate are shown as <strong>Unknown</strong> rather than as zero,
+              and amounts in different currencies are never converted or summed.
             </p>
           </details>
           <details>
             <summary>Can I save my builds?</summary>
             <p>
-              Yes, within this browser. Builds are saved in local storage under keys starting with{' '}
-              <code>pyai.</code> and can be exported as JSON for portability. Nothing is uploaded,
-              and clearing your site data removes them.
+              {buildStore === 'local'
+                ? 'Yes. Build snapshots are saved in this browser and can be exported as JSON. Clearing site data removes the local copies.'
+                : 'Yes. Build snapshots are saved through the configured API, with a browser cache and library index. Removing a library entry does not delete its API copy.'}
+              {mode === 'http'
+                ? ' The API also receives build identifiers and revisions for analysis requests.'
+                : ''}
             </p>
           </details>
           <details>
             <summary>Can I use it without creating an account?</summary>
             <p>
-              Yes. There is no account, no sign-in and no server-side storage of your
-              configurations. The site runs entirely in your browser.
+              This site provides no account or sign-in.{' '}
+              {mode === 'http'
+                ? 'It connects to the configured API; its operator controls that service.'
+                : 'The fixture preview runs in this browser.'}
             </p>
           </details>
           <details>

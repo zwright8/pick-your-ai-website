@@ -13,7 +13,8 @@ import { useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { CatalogItem, CostEstimate, EvaluationReport } from '../contracts';
 import { Icon, type IconName } from './icon';
-import { costShort } from '../lib/item-cost';
+import { costShort, formatAmount } from '../lib/item-cost';
+import { toScaled } from '../domain/decimal';
 
 // --------------------------------------------------------------------------------- chips -----
 
@@ -83,6 +84,7 @@ export function SortHeader({
   dir,
   onSort,
   numeric,
+  grouped,
 }: {
   label: string;
   sortKey: string;
@@ -90,13 +92,14 @@ export function SortHeader({
   dir: SortDir;
   onSort: (key: string) => void;
   numeric?: boolean;
+  grouped?: boolean;
 }) {
   const active = sort === sortKey;
   return (
     <th
       scope="col"
       className={numeric ? 'num' : undefined}
-      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      aria-sort={active ? (grouped ? 'other' : dir === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
         type="button"
@@ -104,6 +107,11 @@ export function SortHeader({
         onClick={() => onSort(sortKey)}
       >
         {label}
+        {active && grouped ? (
+          <span className="sr-only">
+            , {dir === 'asc' ? 'ascending' : 'descending'} within price groups
+          </span>
+        ) : null}
         <SortCaret dir={active ? dir : null} />
       </button>
     </th>
@@ -189,6 +197,7 @@ export function Box({
 
 /** The build context kept visible while browsing the catalog (research §4.2). */
 export function MiniBuild({
+  dataMode,
   selected,
   required,
   outcome,
@@ -197,6 +206,7 @@ export function MiniBuild({
   unknown,
   incomplete,
 }: {
+  dataMode: 'fixture' | 'http';
   selected: number;
   required: { done: number; total: number };
   outcome: 'pass' | 'fail' | 'unknown' | 'none';
@@ -247,7 +257,9 @@ export function MiniBuild({
               : outcome === 'pass'
                 ? 'No published rule fails for this revision.'
                 : 'Not evaluated yet.'}{' '}
-        Estimates are synthetic demo data, not quotes.
+        {dataMode === 'fixture'
+          ? 'Estimates are synthetic demo data, not quotes.'
+          : 'Estimates are not quotes.'}
       </p>
       <div style={{ padding: '0 10px 10px' }}>
         <Link className="pbtn" to="/builder" style={{ width: '100%' }}>
@@ -508,14 +520,8 @@ export function Money({
   approximate?: boolean;
 }) {
   if (amount === null) return <span className="dim">{unknownLabel}</span>;
-  const n = Number(amount);
-  if (!Number.isFinite(n)) return <span className="dim">{unknownLabel}</span>;
-  const text = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
-    maximumFractionDigits: 2,
-  }).format(n);
+  if (toScaled(amount) === null) return <span className="dim">{unknownLabel}</span>;
+  const text = formatAmount(amount, currency);
   return (
     <span className="cmp-num">
       {approximate ? '≥ ' : ''}

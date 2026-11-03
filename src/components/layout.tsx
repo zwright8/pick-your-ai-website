@@ -36,14 +36,20 @@ export function Brand({ className = 'brand' }: { className?: string }) {
 
 /** "INTERACTIVE DESIGN PREVIEW" strip: the site's standing synthetic-data disclosure. */
 export function DemoBanner() {
-  const { mode } = useData();
+  const { mode, buildStore } = useData();
   return (
-    <div className="demo-banner" role="note" aria-label="Demo mode">
+    <div
+      className="demo-banner"
+      role="note"
+      aria-label={mode === 'fixture' ? 'Demo mode' : 'Data source'}
+    >
       <strong>INTERACTIVE DESIGN PREVIEW</strong>{' '}
       <span>
-        · Components, costs and compatibility checks use synthetic illustrative demo data, not
-        verified vendor information.
-        {mode === 'http' ? ' This deployment reads a configured API.' : ''}{' '}
+        {mode === 'fixture'
+          ? '· Components, costs and compatibility checks use synthetic illustrative demo data, not verified vendor information.'
+          : buildStore === 'http'
+            ? '· This deployment uses a configured API. Build snapshots and analysis requests are sent to it.'
+            : '· This deployment uses a configured API. Analysis requests include build identifiers and revisions.'}{' '}
         <Link to="/methodology#data" className="underline underline-offset-2">
           Why?
         </Link>
@@ -149,6 +155,7 @@ function Header() {
 }
 
 function Footer() {
+  const { mode } = useData();
   return (
     <footer className="no-print">
       <div className="container">
@@ -164,7 +171,7 @@ function Footer() {
             <h2>Explore</h2>
             <Link to="/builder">Stack builder</Link>
             <Link to="/catalog">Component catalog</Link>
-            <Link to="/templates">Starter stacks</Link>
+            {mode === 'fixture' ? <Link to="/templates">Starter stacks</Link> : null}
           </div>
           <div className="footer-column">
             <h2>Learn</h2>
@@ -174,7 +181,7 @@ function Footer() {
             <Link to="/legal">Privacy &amp; terms</Link>
           </div>
           <div className="footer-column">
-            <h2>Demo controls</h2>
+            <h2>{mode === 'fixture' ? 'Demo controls' : 'Workspace'}</h2>
             <Link to="/builds">Saved builds</Link>
             <Link to="/compare">Comparison lab</Link>
             <a href={RESEARCH_REPO}>Research repository</a>
@@ -188,7 +195,11 @@ function Footer() {
             <span data-testid="data-mode">{buildVersion.dataMode}</span> · CONTRACT v
             {CONTRACT_PROVENANCE.contractVersion} @{shortSha(CONTRACT_PROVENANCE.sourceSha)}
           </span>
-          <span>DEMONSTRATION ONLY. NO LIVE CATALOG, BENCHMARKS OR PRICES.</span>
+          <span>
+            {mode === 'fixture'
+              ? 'DEMONSTRATION ONLY. NO LIVE CATALOG, BENCHMARKS OR PRICES.'
+              : 'CATALOG FROM CONFIGURED API · ESTIMATES ARE NOT QUOTES.'}
+          </span>
         </div>
       </div>
     </footer>

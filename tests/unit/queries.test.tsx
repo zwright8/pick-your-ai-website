@@ -9,9 +9,10 @@ import { useBuilder } from '../../src/app/builder-context';
 import type { BuildSnapshot, CostEstimate, EvaluationReport } from '../../src/contracts';
 import { createFixtureProviders } from '../../src/data/fixture/providers';
 import type { ResourceEstimateResult } from '../../src/data/types';
-import { createDraft } from '../../src/domain/build';
+import { createDraft, updateObjectives } from '../../src/domain/build';
+import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import BuildSummaryPage from '../../src/pages/BuildSummaryPage';
-import { BY_ID, NOW, apiChat, resourceEstimate } from './scenarios';
+import { BY_ID, NOW, apiChat, buildWith, resourceEstimate } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
 
@@ -63,7 +64,15 @@ async function analysisHarness() {
   const wrapper = wrapperFor(providers, client);
   const initialProps: { current: BuildSnapshot | null } = { current: build };
   const hook = renderHook(
-    ({ current }: { current: BuildSnapshot | null }) => useBuildAnalysis(current),
+    ({ current }: { current: BuildSnapshot | null }) => {
+      const analysis = useBuildAnalysis(current);
+      return {
+        ...analysis,
+        costError: analysis.costQuery.isError,
+        resourceError: analysis.resourcesQuery.isError,
+        evaluationError: analysis.evaluation.isError,
+      };
+    },
     {
       initialProps,
       wrapper,
@@ -88,6 +97,163 @@ async function analysisHarness() {
 }
 
 describe('build analysis identity', () => {
+  it('does not treat a failed cost refresh as current evidence', async () => {
+    const h = await analysisHarness();
+    h.estimate.mockRejectedValue(new Error('pricing unavailable'));
+    let refreshStatus = '';
+    await act(async () => {
+      refreshStatus = (await h.result.current.costQuery.refetch()).status;
+    });
+    expect(refreshStatus).toBe('error');
+    await waitFor(() => expect(h.result.current.costError).toBe(true));
+    expect(h.result.current.costIsCurrent).toBe(false);
+    await waitFor(() =>
+      expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+        costEstimate: null,
+        resourceEstimate: h.resources.status === 'available' ? h.resources.estimate : null,
+      }),
+    );
+    h.unmount();
+  });
+
+  it('does not treat a failed resource refresh as current evidence', async () => {
+    const h = await analysisHarness();
+    h.estimateResources.mockRejectedValue(new Error('resources unavailable'));
+    await act(async () => {
+      await h.result.current.resourcesQuery.refetch();
+    });
+    await waitFor(() => expect(h.result.current.resourceError).toBe(true));
+    expect(h.result.current.resources).toBeUndefined();
+    await waitFor(() =>
+      expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+        costEstimate: h.cost,
+        resourceEstimate: null,
+      }),
+    );
+    h.unmount();
+  });
+
+  it('does not mark an old evaluation current after a failed refresh', async () => {
+    const h = await analysisHarness();
+    h.evaluate.mockRejectedValue(new Error('evaluation unavailable'));
+    await act(async () => {
+      await h.result.current.evaluation.refetch();
+    });
+    await waitFor(() => expect(h.result.current.evaluationError).toBe(true));
+    expect(h.result.current.reportIsCurrent).toBe(false);
+    h.unmount();
+  });
+
+  it('reevaluates when capacity evidence changes under the same ID', async () => {
+    const build = apiChat();
+    const providers = createFixtureProviders({ now: () => NOW });
+    const initial = resourceEstimate(build, '8', 'calibrated');
+    const updated = resourceEstimate(build, '24', 'calibrated');
+    expect(initial.id).toBe(updated.id);
+    vi.spyOn(providers.resources, 'estimate').mockResolvedValue({
+      status: 'available',
+      estimate: initial,
+    });
+    const originalEvaluate = providers.compatibility.evaluate.bind(providers.compatibility);
+    const pending = deferred<EvaluationReport>();
+    const evaluate = vi
+      .spyOn(providers.compatibility, 'evaluate')
+      .mockImplementation((current, evidence) =>
+        evidence?.resourceEstimate?.estimates[0]?.value === '24'
+          ? pending.promise
+          : originalEvaluate(current, evidence),
+      );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const h = renderHook(() => useBuildAnalysis(build), { wrapper: wrapperFor(providers, client) });
+    await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
+    await waitFor(() =>
+      expect(evaluate).toHaveBeenCalledWith(
+        build,
+        expect.objectContaining({ resourceEstimate: initial }),
+      ),
+    );
+    act(() =>
+      client.setQueryData(['resources', build.id, build.revision, build], {
+        status: 'available',
+        estimate: updated,
+      }),
+    );
+    await waitFor(() =>
+      expect(evaluate).toHaveBeenCalledWith(
+        build,
+        expect.objectContaining({ resourceEstimate: updated }),
+      ),
+    );
+    expect(h.result.current.reportIsCurrent).toBe(false);
+    const report = await originalEvaluate(build, {
+      costEstimate: h.result.current.cost,
+      resourceEstimate: updated,
+    });
+    await act(async () => pending.resolve(report));
+    await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
+    h.unmount();
+    client.clear();
+  });
+
+  it('reevaluates the budget when a rate expires but the estimate ID is reused', async () => {
+    let now = '2026-11-03T00:00:00Z';
+    const pricebook = {
+      ...DEMO_PRICEBOOK,
+      rates: DEMO_PRICEBOOK.rates.map((rate) =>
+        rate.id === 'rate.demo.aurora-large.out'
+          ? { ...rate, valid_until: '2026-11-04T00:00:00Z' }
+          : rate,
+      ),
+    };
+    const providers = createFixtureProviders({ now: () => now, pricebook });
+    const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
+      monthly_budget_amount: '10000.00',
+    });
+    const originalEvaluate = providers.compatibility.evaluate.bind(providers.compatibility);
+    const pending = deferred<EvaluationReport>();
+    const evaluate = vi
+      .spyOn(providers.compatibility, 'evaluate')
+      .mockImplementation((current, evidence) =>
+        evidence?.costEstimate?.coverage === 'partial'
+          ? pending.promise
+          : originalEvaluate(current, evidence),
+      );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const h = renderHook(() => useBuildAnalysis(build), { wrapper: wrapperFor(providers, client) });
+    await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
+    expect(
+      h.result.current.report?.findings.find(
+        (finding) => finding.rule_id === 'rule.budget.monthly.cap',
+      )?.outcome,
+    ).toBe('pass');
+    const oldId = h.result.current.cost?.id;
+    now = '2026-11-05T00:00:00Z';
+    await act(async () => {
+      await h.result.current.costQuery.refetch();
+    });
+    await waitFor(() =>
+      expect(evaluate).toHaveBeenCalledWith(
+        build,
+        expect.objectContaining({
+          costEstimate: expect.objectContaining({ id: oldId, coverage: 'partial' }),
+        }),
+      ),
+    );
+    expect(h.result.current.reportIsCurrent).toBe(false);
+    const updatedCost = h.result.current.cost;
+    if (!updatedCost) throw new Error('Expected refreshed cost');
+    const updatedReport = await originalEvaluate(build, { costEstimate: updatedCost });
+    await act(async () => pending.resolve(updatedReport));
+    await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
+    expect(
+      h.result.current.report?.findings.find(
+        (finding) => finding.rule_id === 'rule.budget.monthly.cap',
+      )?.outcome,
+    ).toBe('unknown');
+    h.unmount();
+    client.clear();
+  });
+
   it.each(['another build at the same revision', 'a new revision of the same build'])(
     'keeps placeholders stale and excludes their evidence for %s',
     async (change) => {
@@ -241,7 +407,7 @@ describe('build analysis identity', () => {
 
     const updatedEstimate = { ...estimate, id: 'resources.updated' };
     act(() =>
-      client.setQueryData(['resources', build.id, build.revision], {
+      client.setQueryData(['resources', build.id, build.revision, build], {
         status: 'available',
         estimate: updatedEstimate,
       }),
@@ -258,7 +424,7 @@ describe('build analysis identity', () => {
     await waitFor(() => expect(h.result.current.reportIsCurrent).toBe(true));
 
     const updatedCost = { ...h.result.current.cost!, id: 'cost.updated' };
-    act(() => client.setQueryData(['cost', build.id, build.revision], updatedCost));
+    act(() => client.setQueryData(['cost', build.id, build.revision, build], updatedCost));
     await waitFor(() => expect(evaluate).toHaveBeenCalledTimes(4));
     expect(evaluate).toHaveBeenLastCalledWith(build, {
       costEstimate: updatedCost,

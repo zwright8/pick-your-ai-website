@@ -30,6 +30,7 @@ No utility framework is used: components carry the mock's semantic class names
 - Accents: `--accent #69e5bd` (mint), `--accent2 #28b899`, plus `--orange`, `--red`, `--blue` for status.
 - Type: `--display` Space Grotesk, `--body` DM Sans, `--mono` IBM Plex Mono (loaded from Google Fonts in `index.html`).
 - Shape: `--radius 12px`, `--shadow` for floating panels.
+- Notices: `--notice-text-size`, `--notice-gap`, `--notice-content-gap` and `--notice-control-height` size persistent messages and their actions.
 - Theme: the `light` class on `<html>`, applied before first paint by `public/theme-init.js` and toggled from the header; the choice is stored in `pyai.theme`. Dark is the default (as in the mock).
 - Motion: minimal (hover lifts, the `live-dot` pulse, the toast slide). Everything is disabled under `prefers-reduced-motion`.
 

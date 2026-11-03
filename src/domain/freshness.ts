@@ -42,7 +42,7 @@ export function buildStaleness(build: BuildSnapshot, snapshot: CatalogSnapshot):
   const missing: string[] = [];
   for (const s of build.selections) {
     const item = byId.get(s.catalog_item_id);
-    if (!item) missing.push(s.id);
+    if (!item || item.kind !== s.kind) missing.push(s.id);
     else if (item.version !== s.catalog_item_version) drifted.push(s.id);
   }
   return {

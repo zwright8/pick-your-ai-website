@@ -15,6 +15,10 @@ import ComparePage from '../../src/pages/ComparePage';
 import { BY_ID, NOW, apiChat } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
+vi.mock('react-router', async (original) => ({
+  ...(await original<typeof import('react-router')>()),
+  useBlocker: () => ({ state: 'unblocked' }),
+}));
 
 describe('locked pricebook on component surfaces', () => {
   it.each([

@@ -14,12 +14,12 @@
  *    unpriced unless the build policy allows unverified catalog items, so the row is derived from
  *    the estimator's admission decision instead of short-circuiting it.
  *
- * Amounts are synthetic (see methodology → pricing).
+ * Data provenance is presented by the consuming view.
  */
 import type { BuildSnapshot, CatalogItem, CostEstimate, Pricebook, Selection } from '../contracts';
 import { estimateCost } from '../domain/cost';
-import { addOrReplace, defaultSettings } from '../domain/build';
-import { addDecimals } from '../domain/decimal';
+import { addOrReplace, defaultSettings, selectionMatchesItem } from '../domain/build';
+import { SCALED_ONE, addDecimals, compareScaled, formatScaled, toScaled } from '../domain/decimal';
 
 export interface ItemPrice {
   /** Amount as a decimal string, or null when the item cannot be priced. */
@@ -35,28 +35,31 @@ export interface ItemPrice {
   included: boolean;
 }
 
+/** Sort known complete prices first, then lower bounds, then unknowns in either direction. */
+export function compareItemPrices(a: ItemPrice, b: ItemPrice, direction: 'asc' | 'desc'): number {
+  const left = a.amount === null ? null : toScaled(a.amount);
+  const right = b.amount === null ? null : toScaled(b.amount);
+  const rank = (amount: bigint | null, partial: boolean) => (amount === null ? 2 : partial ? 1 : 0);
+  const group = rank(left, a.partial) - rank(right, b.partial);
+  if (group) return group;
+  if (left === null || right === null) return 0;
+  return (
+    a.currency.localeCompare(b.currency) ||
+    compareScaled(left, right) * (direction === 'asc' ? 1 : -1)
+  );
+}
+
 const UNKNOWN: ItemPrice = {
   amount: null,
   currency: 'USD',
   label: 'Unknown',
-  note: 'No applicable demo rate',
+  note: 'No applicable rate',
   partial: false,
   included: false,
 };
 
 export function formatAmount(amount: string, currency = 'USD'): string {
-  const n = Number(amount);
-  if (!Number.isFinite(n)) return `${amount} ${currency}`;
-  try {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `${amount} ${currency}`;
-  }
+  return formatDecimalMoney(amount, currency, false, true);
 }
 
 /** The probe selection for one item, preserving the settings the user already configured. */
@@ -70,7 +73,7 @@ function probeBuild(
   const existing =
     selection === null
       ? undefined
-      : (selection ?? build.selections.find((s) => s.catalog_item_id === item.id));
+      : (selection ?? build.selections.find((s) => selectionMatchesItem(s, item)));
   if (existing) {
     // Reuse the current selection verbatim: instances, region, budget and reserved hours all
     // change the projected quantity, so defaulting them here would misprice the row.
@@ -135,7 +138,7 @@ export function itemPrice(
       label: verified ? 'Included' : 'Included*',
       note: verified
         ? `Free or included billing, verified by recorded provenance.`
-        : 'Free or included billing (unverified demo data; the build policy allows unverified items).',
+        : 'Free or included billing (unverified data; the build policy allows unverified items).',
       partial: false,
       included: true,
     };
@@ -182,13 +185,46 @@ export function totalLabel(amount: string | undefined, currency = 'USD'): string
 }
 
 export function formatMoney(amount: string, currency: string): string {
-  const n = Number(amount);
+  return formatDecimalMoney(amount, currency, false);
+}
+
+/** Preserve every contract decimal digit for a difference, including fractions of a cent. */
+export function formatExactMoney(amount: string, currency: string): string {
+  return formatDecimalMoney(amount, currency, true);
+}
+
+function formatDecimalMoney(
+  amount: string,
+  currency: string,
+  exact: boolean,
+  compact = false,
+): string {
+  const value = toScaled(amount);
+  if (value === null) return `${amount} ${currency}`;
   try {
-    return new Intl.NumberFormat('en-US', {
+    const base = new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
-      maximumFractionDigits: 2,
-    }).format(n);
+      ...(exact ? {} : { maximumFractionDigits: 2 }),
+    });
+    const minimum = compact
+      ? value % SCALED_ONE === 0n
+        ? 0
+        : 2
+      : (base.resolvedOptions().minimumFractionDigits ?? 0);
+    const [integer = '0', decimals = ''] = formatScaled(value, exact ? 12 : 2).split('.');
+    const significant = decimals.replace(/0+$/, '');
+    const fraction = significant.padEnd(Math.max(minimum, significant.length), '0');
+    const formatter = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: fraction.length,
+      maximumFractionDigits: fraction.length,
+    });
+    return formatter
+      .formatToParts(BigInt(integer))
+      .map((part) => (part.type === 'fraction' ? fraction : part.value))
+      .join('');
   } catch {
     return `${amount} ${currency}`;
   }
@@ -232,7 +268,7 @@ export function costShort(cost: CostEstimate | undefined): CostShort {
     return {
       text: total,
       qualifier: `per ${cost.period_days} days`,
-      note: `Complete coverage over ${cost.period_days} days — synthetic estimate, not a quote.`,
+      note: `Complete coverage over ${cost.period_days} days — estimate, not a quote.`,
       complete: true,
     };
   }

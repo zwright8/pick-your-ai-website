@@ -17,6 +17,10 @@ export interface FieldDef {
   required: boolean;
   minimum?: number;
   maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  uniqueItems?: boolean;
+  format?: string;
   pattern?: string;
   description?: string;
   isRef: boolean;
@@ -28,6 +32,10 @@ interface JsonSchemaProp {
   items?: { type?: string; enum?: string[] };
   minimum?: number;
   maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  uniqueItems?: boolean;
+  format?: string;
   pattern?: string;
   description?: string;
   $ref?: string;
@@ -93,6 +101,10 @@ function toField(key: string, p: JsonSchemaProp, required: boolean): FieldDef {
     required,
     minimum: p.minimum,
     maximum: p.maximum,
+    exclusiveMinimum: p.exclusiveMinimum,
+    exclusiveMaximum: p.exclusiveMaximum,
+    uniqueItems: p.uniqueItems,
+    format: p.format,
     pattern: p.pattern,
     description: p.description,
     isRef: /_refs?$/.test(key),

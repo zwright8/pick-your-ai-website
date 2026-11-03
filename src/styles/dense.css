@@ -1323,6 +1323,10 @@ html.light .pnotice-fail {
 
 /* ------------------------------------------------------------------ responsive ---------------- */
 
+.catalog-mobile-sort {
+  display: none;
+}
+
 @media (max-width: 1080px) {
   .parts-cols {
     grid-template-columns: 1fr;
@@ -1336,6 +1340,16 @@ html.light .pnotice-fail {
 
 /* Below 760 px every table row becomes a stacked card (research §3.13, §9). */
 @media (max-width: 760px) {
+  .catalog-mobile-sort {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .catalog-mobile-sort .form-select {
+    min-width: 0;
+    flex: 1;
+  }
   .parts-page {
     padding-top: 14px;
   }

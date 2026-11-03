@@ -15,7 +15,20 @@ import { useData } from '../app/data-context';
 export type CompatOption = CompatibleOption;
 export type VerdictMap = ReadonlyMap<string, CompatOption>;
 
-export const verdictKey = (kind: ComponentKind, itemId: string) => `${kind}|${itemId}`;
+export const verdictKey = (kind: ComponentKind, itemId: string, version: string) =>
+  JSON.stringify([kind, itemId, version]);
+
+/** An ambiguous response is not evidence for a particular catalog version. */
+export function uniqueOptionFor(
+  options: readonly CompatibleOption[] | undefined,
+  itemId: string,
+  version: string,
+): CompatibleOption | undefined {
+  const matches = options?.filter(
+    (option) => option.catalog_item_id === itemId && option.catalog_item_version === version,
+  );
+  return matches?.length === 1 ? matches[0] : undefined;
+}
 
 /** Independent kind queries retain successful verdicts while failed kinds can retry. */
 export function useCompatByKind(
@@ -34,15 +47,31 @@ export function useCompatByKind(
   );
   const queries = useQueries({
     queries: unique.map((kind, index) => ({
-      queryKey: ['compat-kind', build?.id ?? 'none', build?.revision ?? 0, kind, roles[index]],
+      queryKey: [
+        'compat-kind',
+        build?.id ?? 'none',
+        build?.revision ?? 0,
+        build ?? null,
+        kind,
+        roles[index],
+      ],
       queryFn: () => compatibility.compatibleOptions(build!, kind, roles[index]),
       enabled: Boolean(build),
     })),
   });
   const map = new Map<string, CompatOption>();
+  const ambiguous = new Set<string>();
   queries.forEach((query, index) => {
+    if (query.isError || query.isPlaceholderData) return;
     for (const option of query.data ?? []) {
-      map.set(verdictKey(unique[index]!, option.catalog_item_id), option);
+      const key = verdictKey(unique[index]!, option.catalog_item_id, option.catalog_item_version);
+      if (ambiguous.has(key)) continue;
+      if (map.has(key)) {
+        map.delete(key);
+        ambiguous.add(key);
+      } else {
+        map.set(key, option);
+      }
     }
   });
   const failed = queries.filter((query) => query.isError);
@@ -56,11 +85,21 @@ export function useCompatByKind(
 }
 
 /** Verdict for one item, defaulting to `unknown` while the evaluation is in flight. */
-export function verdictFor(map: VerdictMap | undefined, kind: ComponentKind, itemId: string) {
-  return map?.get(verdictKey(kind, itemId))?.verdict ?? 'unknown';
+export function verdictFor(
+  map: VerdictMap | undefined,
+  kind: ComponentKind,
+  itemId: string,
+  version: string,
+) {
+  return map?.get(verdictKey(kind, itemId, version))?.verdict ?? 'unknown';
 }
 
 /** Full option (verdict + failing rule ids) for one item, if it has been evaluated. */
-export function optionFor(map: VerdictMap | undefined, kind: ComponentKind, itemId: string) {
-  return map?.get(verdictKey(kind, itemId));
+export function optionFor(
+  map: VerdictMap | undefined,
+  kind: ComponentKind,
+  itemId: string,
+  version: string,
+) {
+  return map?.get(verdictKey(kind, itemId, version));
 }

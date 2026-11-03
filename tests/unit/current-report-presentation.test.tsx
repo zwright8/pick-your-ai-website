@@ -14,6 +14,10 @@ import { nextAction } from '../../src/features/builder/analysis';
 import { BY_ID, NOW, apiChat, contradictory } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
+vi.mock('react-router', async (original) => ({
+  ...(await original<typeof import('react-router')>()),
+  useBlocker: () => ({ state: 'unblocked' }),
+}));
 
 function showBuild(build: BuildSnapshot) {
   vi.mocked(useBuilder).mockReturnValue({
@@ -111,7 +115,9 @@ describe('current report presentation', () => {
       holding = true;
       evaluateRequest.mockClear();
       if (change === 'replacement evidence') {
-        act(() => client.setQueryData(['cost', current.id, current.revision], currentCost));
+        act(() =>
+          client.setQueryData(['cost', current.id, current.revision, current], currentCost),
+        );
       } else {
         showBuild(current);
         view.rerender(<BuilderPage />);

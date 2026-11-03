@@ -17,20 +17,25 @@ import {
   labelInSentence,
 } from '../../contracts';
 import type { CatalogItem } from '../../contracts';
-import { addOrReplace } from '../../domain/build';
+import { addOrReplace, replacementTarget, selectionMatchesItem } from '../../domain/build';
 import { evidenceDateLabel, itemFreshness } from '../../domain/freshness';
 import { useBuilder } from '../../app/builder-context';
+import { useData } from '../../app/data-context';
 import { useCatalog, useCompatibleOptions, usePricebook } from '../../app/queries';
 import { ErrorState, Loading, useToast } from '../../components/feedback';
 import { Icon } from '../../components/icon';
 import { BILLING_LABELS, idToSlug, itemPath, slugToId } from '../../lib/catalog-view';
 import { itemPrice } from '../../lib/item-cost';
+import { uniqueOptionFor } from '../../lib/compat';
+import { confirmVersionReplacement } from '../../lib/selection-version';
 import { itemLogo } from '../../lib/layers';
 import { type FieldDef, formatValue, specFields } from '../../lib/schema-fields';
 import NotFoundPage from '../../pages/NotFoundPage';
 import { accessSummary, licenseLine, strongestVerification, verificationLabel } from './shared';
 
 export default function ComponentDetailPage() {
+  const { mode } = useData();
+  const demo = mode === 'fixture';
   const { kindSlug = '', itemSlug = '' } = useParams();
   const rawKind = kindFromSlug(kindSlug);
   const kind = isComponentKind(rawKind) ? rawKind : null;
@@ -73,11 +78,12 @@ export default function ComponentDetailPage() {
   const price = itemPrice(item, build, catalog.byId, pricebook.data);
   const freshness = itemFreshness(item);
   const verification = strongestVerification(item);
-  const inStack = Boolean(build?.selections.some((s) => s.catalog_item_id === item.id));
+  const inStack = Boolean(build?.selections.some((s) => selectionMatchesItem(s, item)));
 
-  const verdict = options.isPlaceholderData
-    ? undefined
-    : options.data?.find((option) => option.catalog_item_id === item.id);
+  const verdict =
+    options.isError || options.isPlaceholderData
+      ? undefined
+      : uniqueOptionFor(options.data, item.id, item.version);
   const conflicts = verdict?.verdict === 'incompatible' ? Math.max(verdict.rule_ids.length, 1) : 0;
   const unknown = !verdict || verdict.verdict === 'unknown';
 
@@ -95,6 +101,7 @@ export default function ComponentDetailPage() {
       toast('Your stack is still loading.');
       return;
     }
+    if (!confirmVersionReplacement(replacementTarget(build, item.kind), item)) return;
     apply((b) => addOrReplace(b, item, catalog.byId), `Added ${label}: ${item.name}`, [item.kind]);
     toast(`${item.name} added to your stack.`);
   };
@@ -142,13 +149,13 @@ export default function ComponentDetailPage() {
       value: price.amount ? `${price.label} / month` : `${price.label} — ${price.note}`,
     },
     {
-      label: 'Demo compatibility',
+      label: demo ? 'Demo compatibility' : 'Compatibility',
       value:
         conflicts > 0
-          ? `${conflicts} detected conflict${conflicts === 1 ? '' : 's'} in current demo choices`
+          ? `${conflicts} detected conflict${conflicts === 1 ? '' : 's'} in current ${demo ? 'demo ' : ''}choices`
           : unknown
-            ? 'Unknown — the demo rules cannot decide this item yet'
-            : 'No detected conflicts in current demo choices',
+            ? `Unknown — the ${demo ? 'demo ' : ''}rules cannot decide this item yet`
+            : `No detected conflicts in current ${demo ? 'demo ' : ''}choices`,
     },
   ];
 
@@ -191,14 +198,16 @@ export default function ComponentDetailPage() {
                 </div>
               ))}
             </div>
-            <div className="detail-note">
-              <Icon name="info" />
-              <div>
-                <strong>Preview data only.</strong> This component description, compatibility
-                coverage and estimated costs are illustrative. The production catalog needs sourced
-                product specifications, verified versions and source freshness metadata.
+            {demo || item.tags?.includes('synthetic') ? (
+              <div className="detail-note">
+                <Icon name="info" />
+                <div>
+                  <strong>Preview data only.</strong> This component description, compatibility
+                  coverage and estimated costs are illustrative. The production catalog needs
+                  sourced product specifications, verified versions and source freshness metadata.
+                </div>
               </div>
-            </div>
+            ) : null}
             <h2 className="detail-subhead">Specification</h2>
             <div className="detail-table">
               {fields.map((field) => (
@@ -237,7 +246,7 @@ export default function ComponentDetailPage() {
                   </li>
                 ))
               ) : (
-                <li className="dim">No provenance records in this demo item.</li>
+                <li className="dim">No provenance records in this {demo ? 'demo ' : ''}item.</li>
               )}
             </ul>
           </div>
@@ -246,7 +255,9 @@ export default function ComponentDetailPage() {
               <div className="eyebrow">EXAMPLE MONTHLY BASELINE</div>
               <div className="big-price">
                 {price.amount ? price.label : 'Unknown'}{' '}
-                <span>{price.amount ? '/ month*' : 'no demo rate'}</span>
+                <span>
+                  {price.amount ? '/ month*' : demo ? 'no demo rate' : 'no rate recorded'}
+                </span>
               </div>
               <p>
                 Not a vendor quote. Runtime, traffic, usage, and region can change the real cost
@@ -267,10 +278,10 @@ export default function ComponentDetailPage() {
               <div className={`status-bar${conflicts ? ' issue' : unknown ? ' neutral' : ''}`}>
                 <Icon name={conflicts ? 'x-circle' : unknown ? 'alert' : 'check-circle'} />
                 {conflicts
-                  ? `${conflicts} demo conflict${conflicts === 1 ? '' : 's'} to review`
+                  ? `${conflicts} ${demo ? 'demo ' : ''}conflict${conflicts === 1 ? '' : 's'} to review`
                   : unknown
-                    ? 'Unknown in demo rules — not treated as compatible'
-                    : 'No conflicts in demo rules'}
+                    ? `Unknown in ${demo ? 'demo ' : ''}rules — not treated as compatible`
+                    : `No conflicts in ${demo ? 'demo ' : ''}rules`}
               </div>
             </div>
             <div className="detail-related">
@@ -286,7 +297,9 @@ export default function ComponentDetailPage() {
                   </button>
                 ))
               ) : (
-                <p>No other {labelInSentence(label)} records in this demo catalog.</p>
+                <p>
+                  No other {labelInSentence(label)} records in this {demo ? 'demo ' : ''}catalog.
+                </p>
               )}
             </div>
           </aside>

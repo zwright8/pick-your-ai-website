@@ -1,5 +1,5 @@
 /* Data providers: fixture ↔ HTTP interchangeability, malformed responses and failed requests. */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_GRAPH, BASELINE_RULESET, assertContract } from '../../src/contracts';
 import { createDraft } from '../../src/domain/build';
 import { createProviders, DataConfigError } from '../../src/data/config';
@@ -10,6 +10,8 @@ import { createHttpProviders } from '../../src/data/http/providers';
 import { LocalBuildRepository, type KeyValueStorage } from '../../src/data/local-builds';
 import type { DataProviders } from '../../src/data/types';
 import { CATALOG, NOW, apiChat, contradictory } from './scenarios';
+
+beforeEach(() => localStorage.clear());
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -82,6 +84,18 @@ async function runAll(p: DataProviders, build: ReturnType<typeof apiChat>) {
 }
 
 describe('fixture and HTTP providers are interchangeable', () => {
+  it('removes only the local library copy of an API-backed build', async () => {
+    const api = fakeApi();
+    const providers = httpProviders(api, true);
+    const draft = createDraft(apiChat());
+    await providers.builds.save(draft, null);
+    expect(await providers.builds.list()).toHaveLength(1);
+    const callsBeforeRemoval = api.mock.calls.length;
+    await providers.builds.remove(draft.build.id);
+    expect(api).toHaveBeenCalledTimes(callsBeforeRemoval);
+    expect(await providers.builds.list()).toEqual([]);
+    expect((await providers.builds.get(draft.build.id)).build).toEqual(draft.build);
+  });
   it('accepts a cost estimate for the requested build and revision', async () => {
     const build = apiChat();
     const fixture = createFixtureProviders({ now: () => NOW });
@@ -252,7 +266,7 @@ describe('local build repository', () => {
     await repo.save(d, null);
     expect((await repo.list()).map((s) => s.id)).toEqual([d.build.id]);
     expect((await repo.get(d.build.id)).build).toEqual(d.build);
-    await expect(repo.save({ ...d, build: { ...d.build, revision: 2 } }, 5)).rejects.toMatchObject({
+    await expect(repo.save(createDraft({ ...d.build, revision: 2 }), 5)).rejects.toMatchObject({
       kind: 'conflict',
     });
     await repo.remove(d.build.id);

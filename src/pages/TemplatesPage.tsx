@@ -47,12 +47,11 @@ function TemplateCard({ starter, index }: { starter: Starter; index: number }) {
   const navigate = useNavigate();
   const { startNew } = useBuilder();
   const { pricing } = useData();
-  const toast = useToast();
   const catalog = useCatalog();
   const build = useMemo(() => starter.build(), [starter]);
   // The real preview estimator, not a hand-summed list of card prices.
   const cost = useQuery({
-    queryKey: ['cost', build.id, build.revision],
+    queryKey: ['cost', build.id, build.revision, build],
     queryFn: () => pricing.estimate(build),
     staleTime: Infinity,
   });
@@ -96,9 +95,8 @@ function TemplateCard({ starter, index }: { starter: Starter; index: number }) {
           className="btn btn-primary btn-small"
           type="button"
           onClick={() => {
-            startNew(starter.build(), starter.title);
+            if (startNew(starter.build(), starter.title) === false) return;
             void navigate('/builder');
-            toast(`${displayTitle(starter)} loaded. Swap any component to customize.`);
           }}
         >
           Use this build <Icon name="arrow-right" />
@@ -179,7 +177,7 @@ export default function TemplatesPage() {
             className="btn btn-outline"
             type="button"
             onClick={() => {
-              startNew();
+              if (startNew() === false) return;
               void navigate('/builder');
               toast('New blank build created.');
             }}

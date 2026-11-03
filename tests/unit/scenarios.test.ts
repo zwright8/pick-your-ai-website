@@ -7,6 +7,8 @@ import {
   commit,
   createDraft,
   removeSelection,
+  replaceSelection,
+  selectionMatchesItem,
   setEnabled,
   updateObjectives,
 } from '../../src/domain/build';
@@ -44,6 +46,60 @@ const outcome = (r: ReturnType<typeof evaluate>, ruleId: string) =>
   r.findings.find((f) => f.rule_id === ruleId)?.outcome;
 
 describe('optional workstreams', () => {
+  it('does not infer deployment mode from a different catalog version', () => {
+    const build = apiChat();
+    build.selections = build.selections.map((selection) =>
+      selection.kind === 'deployment_mode'
+        ? { ...selection, catalog_item_version: 'older-version' }
+        : selection,
+    );
+    const context = buildContext(build, BY_ID);
+    expect(context.mode).toBeUndefined();
+    expect(kindNeed('hosting_platform', context.mode)).toBe('depends_on_mode');
+  });
+
+  it('does not price a different-kind catalog record with the selected ID', () => {
+    const build = apiChat();
+    const model = build.selections.find((selection) => selection.kind === 'model');
+    if (!model) throw new Error('Missing model');
+    const wrongKind = {
+      ...item('workload', 'support-chat'),
+      id: model.catalog_item_id,
+      version: model.catalog_item_version,
+    };
+    const catalog = new Map(BY_ID);
+    catalog.set(model.catalog_item_id, wrongKind);
+    const cost = estimateCost(build, catalog, DEMO_PRICEBOOK, { now: NOW });
+    expect(cost.unpriced_selection_ids).toContain(model.id);
+    expect(cost.coverage).not.toBe('complete');
+  });
+
+  it('does not mutate a build when a replacement target is absent or has a different kind', () => {
+    const build = apiChat();
+    expect(replaceSelection(build, 'sel_workload', item('model', 'aurora-mini'), BY_ID)).toBe(
+      build,
+    );
+    expect(replaceSelection(build, 'sel_missing', item('workload', 'document-qa'), BY_ID)).toBe(
+      build,
+    );
+    const model = build.selections.find((selection) => selection.id === 'sel_model');
+    if (!model) throw new Error('Missing model');
+    const ambiguous = {
+      ...build,
+      selections: [...build.selections, { ...model, role: 'secondary' }],
+    };
+    expect(replaceSelection(ambiguous, 'sel_model', item('model', 'aurora-mini'), BY_ID)).toBe(
+      ambiguous,
+    );
+  });
+
+  it('does not treat a different-kind selection as the same catalog record', () => {
+    const model = apiChat().selections.find((selection) => selection.id === 'sel_model');
+    if (!model) throw new Error('Missing model');
+    expect(
+      selectionMatchesItem({ ...model, kind: 'workload' }, item('model', 'aurora-large')),
+    ).toBe(false);
+  });
   it('an API chat build with T2–T6 omitted is valid and complete', () => {
     const b = apiChat();
     const r = evaluate(b);
@@ -242,6 +298,22 @@ describe('missing prices', () => {
 });
 
 describe('catalog evidence dates and version matching', () => {
+  it('treats an ID mapped to a different component kind as missing', () => {
+    const build = apiChat();
+    const model = build.selections.find((selection) => selection.id === 'sel_model');
+    if (!model) throw new Error('Missing model');
+    const wrongKind = {
+      ...item('workload', 'support-chat'),
+      id: model.catalog_item_id,
+      version: model.catalog_item_version,
+    };
+    const snapshot = {
+      ...CATALOG,
+      items: CATALOG.items.map((entry) => (entry.id === model.catalog_item_id ? wrongKind : entry)),
+    };
+    expect(buildStaleness(build, snapshot).missingSelectionIds).toContain('sel_model');
+  });
+
   it('reports capture dates without an age-based validity verdict', () => {
     const old = { ...CATALOG, captured_at: '2000-01-01T00:00:00Z' };
     expect(buildStaleness(apiChat(), old).catalog).toEqual({
@@ -357,6 +429,26 @@ describe('configuration import/export', () => {
     secret.selections[2]!.settings = { credential_ref: 'sk-live-not-a-secret-ref' };
     expect(importBuild(JSON.stringify(secret), 'fixture').ok).toBe(false);
     expect(decodeShareFragment('#b1.@@@', 'fixture').ok).toBe(false);
+  });
+
+  it('handles malformed envelope metadata without throwing', () => {
+    const invalid = { toString: null, valueOf: null };
+    const valid = exportBuild(apiChat(), 'fixture', NOW);
+    expect(importBuild(JSON.stringify({ format: invalid }), 'fixture')).toEqual({
+      ok: false,
+      error: 'Unsupported file format "invalid value".',
+    });
+    expect(importBuild(JSON.stringify({ ...valid, formatVersion: invalid }), 'fixture')).toEqual({
+      ok: false,
+      error: 'Unsupported export version invalid value.',
+    });
+    expect(
+      importBuild(JSON.stringify({ ...valid, contract: { version: invalid } }), 'fixture'),
+    ).toMatchObject({ ok: false, error: expect.stringContaining('contract invalid value') });
+    expect(importBuild(JSON.stringify({ ...valid, dataMode: invalid }), 'fixture')).toMatchObject({
+      ok: true,
+      warnings: [expect.stringContaining('invalid value data')],
+    });
   });
 
   it('warns when a build came from another data mode', () => {

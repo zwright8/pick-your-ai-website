@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { waitForSavedName, waitForSavedRevision } from './helpers/saved-build';
 
 /*
  * End-to-end coverage of the design-mock shell: every page renders, labels demo data, exposes one
@@ -172,9 +173,11 @@ test('builder: parts table, running total, findings, export and theme', async ({
     .getByRole('row', { name: /Demo Customer Support Chat/ })
     .getByRole('button', { name: /^Add$/ })
     .click();
+  await waitForSavedRevision(page, 2);
   await page.goto('/catalog/model?show=all');
   await page.getByRole('button', { name: /^Add$/ }).first().click();
 
+  await waitForSavedRevision(page, 3);
   await page.goto('/builder');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Choose your parts/i);
 
@@ -232,6 +235,7 @@ test('builder: parts table, running total, findings, export and theme', async ({
   const name = page.getByLabel('Build name');
   await name.fill('Support stack v2');
   await name.blur();
+  await waitForSavedName(page, 'Support stack v2');
   await page.reload();
   await expect(page.getByLabel('Build name')).toHaveValue('Support stack v2');
 
@@ -270,9 +274,7 @@ test('catalog: compatibility buckets, sorting, search and add-to-stack', async (
 
   // Sorting is a real sort, announced through aria-sort.
   await page.getByRole('button', { name: /Est\. cost/ }).click();
-  await expect(page.locator('th[aria-sort="ascending"], th[aria-sort="descending"]')).toHaveCount(
-    1,
-  );
+  await expect(page.locator('th[aria-sort="other"]')).toHaveCount(1);
 
   // Search narrows the list and shows a removable filter chip.
   await page.getByLabel('Search these components').fill('aurora');

@@ -1,23 +1,26 @@
 /*
  * Privacy and terms. Styled with the design mock's masthead + chapter treatment; the wording is
- * the project's existing plain-language notice (no analytics, no accounts, local-only storage).
+ * the project's plain-language notice for the configured data and build-storage modes.
  */
 import { PageHeader } from '../components/layout';
 import { Notice } from '../components/feedback';
+import { useData } from '../app/data-context';
 
 const SITE_REPO = 'https://github.com/Pick-Your-AI/pickyour.ai';
 
 export default function LegalPage() {
+  const { mode, buildStore } = useData();
   return (
     <div className="app-page">
       <PageHeader compact breadcrumb="LEGAL" eyebrow="LEGAL" title="Privacy and terms">
         A plain-language notice for the PickYour.AI preview. Last updated{' '}
-        <time dateTime="2026-10-16">2026-10-16</time>.
+        <time dateTime="2026-11-03">2026-11-03</time>.
       </PageHeader>
       <div className="container legal-content">
         <Notice title="Preview notice.">
-          This page describes how the preview works today. It will be revised before the site uses
-          real catalog data or adds any feature that changes what is collected.
+          {mode === 'fixture'
+            ? 'This page describes how the fixture preview works today.'
+            : 'This deployment uses a configured API. Its operator controls the API service and its data handling.'}
         </Notice>
 
         <section className="method-chapter" aria-labelledby="privacy">
@@ -29,19 +32,38 @@ export default function LegalPage() {
             </li>
             <li>
               <strong>No cookies, analytics or trackers.</strong> The site loads no analytics,
-              advertising or third-party scripts. Typefaces are self-hosted, so a page load makes no
-              request to any other origin.
+              advertising or third-party scripts. Typefaces are self-hosted.
+              {mode === 'http'
+                ? ' Catalog and analysis requests go to the configured API, which may be on another origin.'
+                : ' The fixture preview makes no requests to another origin.'}
             </li>
             <li>
-              <strong>Your builds stay in this browser.</strong> Builds and preferences such as the
-              colour theme are saved in this browser&apos;s local storage under keys starting with{' '}
-              <code className="mono">pyai.</code>. They are not sent to us. Clearing your site data
-              removes them.
+              {buildStore === 'local' ? (
+                <>
+                  <strong>Build snapshots are saved in this browser.</strong> Build snapshots and
+                  preferences such as the colour theme are saved in local storage under keys
+                  starting with <code className="mono">pyai.</code>; clearing site data removes
+                  these local copies.
+                </>
+              ) : (
+                <>
+                  <strong>Build snapshots are sent to the configured API.</strong> The browser also
+                  keeps a local cache and library index under keys starting with{' '}
+                  <code className="mono">pyai.</code>; removing a library entry deletes the browser
+                  copy, not the API copy. The API operator controls remote access and retention.
+                </>
+              )}
+              {mode === 'http'
+                ? ' The configured API receives build identifiers and revisions for compatibility and cost requests; those requests can also include analysis identifiers and parameters.'
+                : ''}
             </li>
             <li>
               <strong>Share links carry the build in the URL fragment</strong> (the part after{' '}
-              <code className="mono">#</code>). Browsers do not send the fragment to the server, so
-              the build is only visible to people you give the link to.
+              <code className="mono">#</code>). Browsers do not send the fragment to the web server.
+              Anyone with the link can view the build.
+              {mode === 'http'
+                ? ' Analysis requests can send the shared build’s identifier and revision to the configured API.'
+                : ''}
             </li>
             <li>
               <strong>Server logs.</strong> Like most websites, the hosting provider&apos;s web
@@ -60,8 +82,14 @@ export default function LegalPage() {
               change or be unavailable at any time.
             </li>
             <li>
-              The demo data is <strong>synthetic</strong>. Nothing on the site is advice, a
-              recommendation, a price quote or a statement about a real product. Verify anything
+              {mode === 'fixture' ? (
+                <>
+                  The demo data is <strong>synthetic</strong>.{' '}
+                </>
+              ) : (
+                <>Catalog records may include synthetic data; check their labels and provenance. </>
+              )}
+              Nothing on the site is advice, a recommendation or a price quote. Verify anything
               important with the relevant vendor before you rely on it.
             </li>
             <li>

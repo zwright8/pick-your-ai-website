@@ -23,10 +23,17 @@ import {
   withArticle,
 } from '../../contracts';
 import { buildContext, coverage, kindNeed } from '../../domain/activation';
-import { addOrReplace, replaceSelection } from '../../domain/build';
+import {
+  addOrReplace,
+  replacementTarget,
+  replaceSelection,
+  selectionMatchesItem,
+} from '../../domain/build';
 import { useBuilder } from '../../app/builder-context';
+import { useData } from '../../app/data-context';
 import { useBuildAnalysis, useCatalog, usePricebook, useRuleset } from '../../app/queries';
 import { Icon } from '../../components/icon';
+import { SyntheticBadge } from '../../components/status';
 import {
   ActiveFilters,
   Box,
@@ -43,9 +50,10 @@ import {
   type Verdict,
 } from '../../components/parts';
 import { incompleteBuild } from '../builder/incomplete';
-import { itemPrice } from '../../lib/item-cost';
+import { compareItemPrices, itemPrice } from '../../lib/item-cost';
 import { KEY_FIELDS, itemPath, kindPath, rowSubtitle, specValue } from '../../lib/catalog-view';
 import { useCompatByKind, verdictFor } from '../../lib/compat';
+import { confirmVersionReplacement } from '../../lib/selection-version';
 import { LAYERS, headlineKind, itemLogo, layerOf } from '../../lib/layers';
 import { humanize, formatValue, specFields as schemaSpecFields } from '../../lib/schema-fields';
 import { ErrorState, Loading, useToast } from '../../components/feedback';
@@ -72,6 +80,7 @@ export function PartList({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
+  const { mode: dataMode } = useData();
   const [params, setParams] = useSearchParams();
   const { draft, apply } = useBuilder();
   const catalog = useCatalog();
@@ -129,7 +138,10 @@ export function PartList({
     [mode, kind, layer],
   );
 
-  const replaceTarget = replaceId ? build?.selections.find((s) => s.id === replaceId) : undefined;
+  const replacementCandidates = replaceId
+    ? (build?.selections.filter((s) => s.id === replaceId) ?? [])
+    : [];
+  const replaceTarget = replacementCandidates.length === 1 ? replacementCandidates[0] : undefined;
   const compat = useCompatByKind(build, kinds, {
     role: replaceTarget?.role,
     additional: !replaceId && adding,
@@ -210,14 +222,14 @@ export function PartList({
 
   const rows: Row[] = pool.map((item) => ({
     item,
-    verdict: verdictFor(compat.data, item.kind, item.id),
+    verdict: verdictFor(compat.data, item.kind, item.id, item.version),
     price: itemPrice(
       item,
       build,
       byId,
       pricebook.data,
       replaceTarget
-        ? replaceTarget.catalog_item_id === item.id
+        ? selectionMatchesItem(replaceTarget, item)
           ? replaceTarget
           : null
         : adding && kindDef(item.kind).cardinality === 'many'
@@ -247,18 +259,19 @@ export function PartList({
       .includes(query);
   });
 
-  const value = (r: Row, key: string): string | number => {
+  const value = (r: Row, key: string): string | number | null => {
     if (key === 'name') return r.item.name.toLowerCase();
-    if (key === 'cost') return r.price.amount === null ? Infinity : Number(r.price.amount);
     if (key === 'outcome') return VERDICT_RANK[r.verdict];
     if (key === 'kind') return KIND_LABELS[r.item.kind];
     if (key.startsWith('spec:')) {
       const v = specValue(r.item, key.slice(5));
-      if (v === undefined || v === null) return Infinity; // unknown values sort last
-      if (Array.isArray(v)) return v.length;
+      if (v === undefined || v === null) return null;
       if (typeof v === 'boolean') return v ? 1 : 0;
-      if (typeof v === 'number') return v;
-      return String(v).toLowerCase();
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      return formatValue(
+        v,
+        schemaSpecFields(r.item.kind).find((field) => field.key === key.slice(5)),
+      ).toLowerCase();
     }
     return 0;
   };
@@ -268,11 +281,18 @@ export function PartList({
     if (sort === 'recommended') {
       cmp =
         VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict] || a.item.name.localeCompare(b.item.name);
+    } else if (sort === 'cost') {
+      cmp = compareItemPrices(a.price, b.price, dir) || a.item.name.localeCompare(b.item.name);
     } else {
       const av = value(a, sort);
       const bv = value(b, sort);
-      cmp = av < bv ? -1 : av > bv ? 1 : a.item.name.localeCompare(b.item.name);
-      if (dir === 'desc') cmp = -cmp;
+      if (av === null || bv === null) {
+        cmp = av === bv ? a.item.name.localeCompare(b.item.name) : av === null ? 1 : -1;
+      } else {
+        cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        if (dir === 'desc') cmp = -cmp;
+        cmp ||= a.item.name.localeCompare(b.item.name);
+      }
     }
     return cmp;
   });
@@ -281,9 +301,16 @@ export function PartList({
     if (sort === key) update({ sort: key, dir: dir === 'asc' ? 'desc' : 'asc' });
     else update({ sort: key, dir: 'asc' });
   };
+  const mobileSortFields = [
+    { key: 'name', label: 'Component' },
+    ...(singleKind ? [] : [{ key: 'kind', label: 'Kind' }]),
+    ...specFields.map((field) => ({ key: `spec:${field}`, label: humanize(field) })),
+    { key: 'outcome', label: 'Compatibility' },
+    { key: 'cost', label: 'Estimated cost' },
+  ];
 
   const inStack = (item: CatalogItem) =>
-    build.selections.some((s) => s.catalog_item_id === item.id);
+    build.selections.some((s) => selectionMatchesItem(s, item));
   /*
    * Except when explicitly adding another many-kind selection, Add must be a no-op for an already selected component: `addOrReplace` runs
    * `replaceSelection` over the existing selection, which resets every setting the user configured
@@ -291,13 +318,15 @@ export function PartList({
    */
   const addIsNoop = (item: CatalogItem) =>
     replaceTarget
-      ? replaceTarget.catalog_item_id === item.id
+      ? selectionMatchesItem(replaceTarget, item)
       : !(adding && kindDef(item.kind).cardinality === 'many') && inStack(item);
+  const cannotReplace = (item: CatalogItem) =>
+    Boolean(replaceId && (!replaceTarget || replaceTarget.kind !== item.kind));
 
   const add = (item: CatalogItem) => {
     if (replaceId) {
-      if (!replaceTarget) {
-        toast('That selection no longer exists. Choose a component instead.');
+      if (!replaceTarget || replaceTarget.kind !== item.kind) {
+        toast('That replacement slot is unavailable for this component. Return to the builder.');
         return;
       }
       if (addIsNoop(item)) {
@@ -305,6 +334,7 @@ export function PartList({
         void navigate('/builder');
         return;
       }
+      if (!confirmVersionReplacement(replaceTarget, item)) return;
       apply(
         (b) => replaceSelection(b, replaceId, item, byId),
         `Replaced ${KIND_LABELS[item.kind]} with ${item.name}`,
@@ -318,6 +348,10 @@ export function PartList({
       toast(`${item.name} is already in your stack. Change or remove it in the builder.`);
       return;
     }
+    if (
+      !confirmVersionReplacement(replacementTarget(build, item.kind, { additional: adding }), item)
+    )
+      return;
     apply(
       (b) => addOrReplace(b, item, byId, { additional: adding }),
       `${adding ? 'Added an additional' : 'Selected'} ${KIND_LABELS[item.kind]}: ${item.name}`,
@@ -368,8 +402,23 @@ export function PartList({
         <div className="pnotice" style={{ marginBottom: 12 }}>
           <Icon name="arrow-right" />
           <span>
-            <strong>Replacing a component.</strong> Choosing a product here swaps it into your stack
-            and returns to the builder. <Link to="/builder">Cancel</Link>
+            {!replaceTarget || (singleKind && replaceTarget.kind !== singleKind) ? (
+              <>
+                <strong>Replacement unavailable.</strong> This slot is missing, ambiguous, or
+                belongs to another component kind.{' '}
+                <Link className="text-link" to="/builder">
+                  Return to the builder
+                </Link>
+              </>
+            ) : (
+              <>
+                <strong>Replacing a component.</strong> Choose a product of the same kind to swap it
+                into your stack and return to the builder.{' '}
+                <Link className="text-link" to="/builder">
+                  Cancel
+                </Link>
+              </>
+            )}
           </span>
         </div>
       ) : null}
@@ -387,6 +436,7 @@ export function PartList({
       <div className="parts-cols">
         <aside className="prail" aria-label="Build context and filters">
           <MiniBuild
+            dataMode={dataMode}
             selected={build.selections.filter((s) => s.enabled).length}
             required={{
               done: cov.needed.length - cov.missing.length,
@@ -524,12 +574,47 @@ export function PartList({
             onClear={() => update({ q: null, oss: null, show: null, sort: null, dir: null })}
           />
 
+          <div className="catalog-mobile-sort">
+            <label htmlFor="catalog-mobile-sort">Sort components</label>
+            <select
+              id="catalog-mobile-sort"
+              className="form-select"
+              value={sort === 'recommended' ? 'recommended' : `${sort}|${dir}`}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === 'recommended') update({ sort: null, dir: null });
+                else {
+                  const separator = value.lastIndexOf('|');
+                  update({ sort: value.slice(0, separator), dir: value.slice(separator + 1) });
+                }
+              }}
+            >
+              <option value="recommended">Recommended</option>
+              {mobileSortFields.flatMap((field) => [
+                <option key={`${field.key}-asc`} value={`${field.key}|asc`}>
+                  {field.label} · ascending
+                </option>,
+                <option key={`${field.key}-desc`} value={`${field.key}|desc`}>
+                  {field.label} · descending
+                </option>,
+              ])}
+            </select>
+          </div>
+
+          {sort === 'cost' ? (
+            <p className="pbox-note">
+              Complete estimates come first, followed by partial lower bounds, then unknown prices.
+              Amounts are ordered within each group.
+            </p>
+          ) : null}
+
           <div className="pt-wrap">
             <div className="pt-scroll" tabIndex={0} role="region" aria-label="Scrollable part list">
               <table className="pt">
                 <caption>
                   {sorted.length} component{sorted.length === 1 ? '' : 's'}
-                  {single ? ` · ${KIND_LABELS[single]}` : ''} · synthetic demo catalog
+                  {single ? ` · ${KIND_LABELS[single]}` : ''}
+                  {dataMode === 'fixture' ? ' · synthetic demo catalog' : ''}
                 </caption>
                 <thead>
                   <tr>
@@ -576,6 +661,7 @@ export function PartList({
                       dir={dir}
                       onSort={onSort}
                       numeric
+                      grouped
                     />
                     <th scope="col" className="num">
                       <span>Add</span>
@@ -633,6 +719,9 @@ export function PartList({
                               </span>
                               <span style={{ minWidth: 0 }}>
                                 <Link to={itemPath(item)}>{item.name}</Link>
+                                {dataMode === 'http' && item.tags?.includes('synthetic') ? (
+                                  <SyntheticBadge />
+                                ) : null}
                                 <span className="pt-sub">
                                   {rowSubtitle(item)}
                                   {picked ? ' · in your stack' : ''}
@@ -705,17 +794,19 @@ export function PartList({
                                       ? 'pbtn pbtn-blocked'
                                       : 'pbtn pbtn-add'
                                 }
-                                disabled={addIsNoop(item)}
+                                disabled={cannotReplace(item) || addIsNoop(item)}
                                 title={
-                                  addIsNoop(item)
-                                    ? `${item.name} is already selected; change its settings in the builder`
-                                    : settled
-                                      ? undefined
-                                      : replaceTarget
-                                        ? `${item.name} replaces the chosen slot with default settings`
-                                        : picked
-                                          ? `${item.name} is already in your stack; this adds a second, separately configured selection`
-                                          : undefined
+                                  cannotReplace(item)
+                                    ? 'This replacement requires a unique slot of the same component kind.'
+                                    : addIsNoop(item)
+                                      ? `${item.name} is already selected; change its settings in the builder`
+                                      : settled
+                                        ? undefined
+                                        : replaceTarget
+                                          ? `${item.name} replaces the chosen slot with default settings`
+                                          : picked
+                                            ? `${item.name} is already in your stack; this adds a second, separately configured selection`
+                                            : undefined
                                 }
                                 onClick={() => add(item)}
                               >
@@ -748,7 +839,7 @@ export function PartList({
               The legend detail lives in the column headers' titles instead.
             */}
             <span className="pbar-meta">
-              Synthetic demo estimates · not a quote ·{' '}
+              {dataMode === 'fixture' ? 'Synthetic demo estimates' : 'Estimates'} · not a quote ·{' '}
               <abbr title="Free or included billing on an unverified record that the build policy admits">
                 Included*
               </abbr>{' '}

@@ -15,8 +15,21 @@ import type {
 } from '../contracts';
 import { BASELINE_GRAPH, BASELINE_RULESET, kindDef } from '../contracts';
 import { primarySelection } from './activation';
+import { MAX_BUILD_NAME_CODEPOINTS } from './build-name';
 
 export const DEFAULT_PRICEBOOK_ID = 'prices.demo.1';
+
+/** A catalog record is selected only when its kind, ID and version match. */
+export function selectionMatchesItem(
+  selection: Pick<Selection, 'kind' | 'catalog_item_id' | 'catalog_item_version'>,
+  item: Pick<CatalogItem, 'kind' | 'id' | 'version'>,
+): boolean {
+  return (
+    selection.kind === item.kind &&
+    selection.catalog_item_id === item.id &&
+    selection.catalog_item_version === item.version
+  );
+}
 
 export type BuildObjectives = BuildSnapshot['objectives'];
 
@@ -276,6 +289,19 @@ export interface AddOptions {
   additional?: boolean;
 }
 
+/** The existing slot that a normal add action would replace, if any. */
+export function replacementTarget(
+  build: BuildSnapshot,
+  kind: ComponentKind,
+  options: AddOptions = {},
+): Selection | undefined {
+  if (options.additional && kindDef(kind).cardinality === 'many') return undefined;
+  return (
+    primarySelection(build, kind) ??
+    build.selections.find((selection) => selection.kind === kind && selection.role === 'primary')
+  );
+}
+
 /** Adds an item. For `cardinality: one` kinds (or when not additional) it replaces the primary. */
 export function addOrReplace(
   build: BuildSnapshot,
@@ -284,11 +310,8 @@ export function addOrReplace(
   opts: AddOptions = {},
 ): BuildSnapshot {
   const kind = item.kind;
-  const existing =
-    primarySelection(build, kind) ??
-    build.selections.find((s) => s.kind === kind && s.role === 'primary');
-  const many = kindDef(kind).cardinality === 'many';
-  if (existing && !(opts.additional && many)) {
+  const existing = replacementTarget(build, kind, opts);
+  if (existing) {
     return replaceSelection(build, existing.id, item, catalog);
   }
   const selection: Selection = {
@@ -313,6 +336,8 @@ export function replaceSelection(
   item: CatalogItem,
   catalog: ReadonlyMap<string, CatalogItem>,
 ): BuildSnapshot {
+  const targets = build.selections.filter((selection) => selection.id === selectionId);
+  if (targets.length !== 1 || targets[0]?.kind !== item.kind) return build;
   return {
     ...build,
     objectives: objectivesFromWorkload(build.objectives, item),
@@ -333,9 +358,11 @@ export function replaceSelection(
 export function removeSelection(build: BuildSnapshot, selectionId: string): BuildSnapshot {
   const removed = build.selections.find((s) => s.id === selectionId);
   let selections = build.selections.filter((s) => s.id !== selectionId);
-  // Promote the next selection of the same kind to primary so rules keep addressing a component.
+  // Prefer an active selection so primary-based checks still address an enabled component.
   if (removed?.role === 'primary') {
-    const promote = selections.find((s) => s.kind === removed.kind);
+    const promote =
+      selections.find((s) => s.kind === removed.kind && s.enabled) ??
+      selections.find((s) => s.kind === removed.kind);
     if (promote)
       selections = selections.map((s) => (s.id === promote.id ? { ...s, role: 'primary' } : s));
   }
@@ -393,7 +420,10 @@ export function updateObjectives(
 }
 
 export function rename(build: BuildSnapshot, name: string): BuildSnapshot {
-  return { ...build, name: name.trim().slice(0, 160) || build.name };
+  return {
+    ...build,
+    name: Array.from(name.trim()).slice(0, MAX_BUILD_NAME_CODEPOINTS).join('') || build.name,
+  };
 }
 
 export function selectionsOfKind(build: BuildSnapshot, kind: ComponentKind): Selection[] {

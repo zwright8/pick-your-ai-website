@@ -1,7 +1,8 @@
 /* Build-level objectives and policy (contract build.schema.json `objectives` and `policy`). */
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import type { BuildSnapshot } from '../../contracts';
 import { DEMO_REGIONS } from '../../data/fixture/catalog';
+import { parseDecimalInput } from '../../lib/numeric-input';
 
 type Objectives = BuildSnapshot['objectives'];
 type Policy = NonNullable<BuildSnapshot['policy']>;
@@ -13,17 +14,24 @@ const NUMERIC: { key: keyof Objectives; label: string; min: number }[] = [
   { key: 'max_concurrency', label: 'Max concurrency', min: 1 },
   { key: 'max_latency_ms', label: 'Max latency (ms)', min: 1 },
 ];
+const HINTS: Record<string, string> = {
+  region: 'Demo regions: ' + DEMO_REGIONS.join(', '),
+  monthly_budget_amount:
+    'Checked only with a cost policy that enforces a hard cap, and only against a complete quote.',
+};
 
 export function ObjectivesForm({
   build,
   onApply,
+  onDirtyChange,
 }: {
   build: BuildSnapshot;
-  onApply: (objectives: Partial<Objectives>, policy: Policy) => void;
+  onApply: (objectives: Partial<Objectives>, policy: Partial<Policy>) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const id = useId();
   const o = build.objectives;
-  const [form, setForm] = useState<Record<string, string>>({
+  const initial: Record<string, string> = {
     region: o.region,
     currency: o.currency,
     data_classification: o.data_classification,
@@ -33,18 +41,33 @@ export function ObjectivesForm({
     ),
     fail_on_unknown: String(build.policy?.fail_on_unknown ?? false),
     min_resource_confidence: build.policy?.min_resource_confidence ?? 'calibrated',
-  });
+  };
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const form = { ...initial, ...edits };
+  const dirty = Object.entries(edits).some(([key, value]) => value !== initial[key]);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const set = (k: string) => (e: { target: { value: string } }) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: string) => (e: { target: { value: string } }) => {
+    const value = e.target.value;
+    setEdits((previous) => {
+      const next = { ...previous };
+      if (value === initial[k]) delete next[k];
+      else next[k] = value;
+      return next;
+    });
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!form.region?.trim()) errs.region = 'Region is required.';
-    if (!/^[A-Z]{3}$/.test(form.currency ?? ''))
+    const changed = (key: string) => Object.hasOwn(edits, key) && edits[key] !== initial[key];
+    if (changed('region') && !form.region) errs.region = 'Region is required.';
+    if (changed('currency') && !/^[A-Z]{3}$/.test(form.currency ?? ''))
       errs.currency = 'Use a three-letter ISO currency code, e.g. USD.';
     if (
+      changed('monthly_budget_amount') &&
       form.monthly_budget_amount &&
       !/^(0|[1-9][0-9]*)(\.[0-9]{1,12})?$/.test(form.monthly_budget_amount)
     ) {
@@ -52,40 +75,47 @@ export function ObjectivesForm({
     }
     const numeric: Partial<Objectives> = {};
     for (const n of NUMERIC) {
-      const raw = form[n.key] ?? '';
+      if (!changed(n.key)) continue;
+      const raw = (form[n.key] ?? '').trim();
       if (raw === '') {
         (numeric as Record<string, unknown>)[n.key] = undefined;
         continue;
       }
-      const v = Number(raw);
-      if (!Number.isInteger(v) || v < n.min) errs[n.key] = `Enter a whole number ≥ ${n.min}.`;
+      const v = parseDecimalInput(raw);
+      if (!Number.isSafeInteger(v) || v < n.min)
+        errs[n.key] = `Enter a whole number ≥ ${n.min} within the supported range.`;
       else (numeric as Record<string, unknown>)[n.key] = v;
     }
     setErrors(errs);
     if (Object.keys(errs).length) return;
-    onApply(
-      {
-        region: form.region!.trim(),
-        currency: form.currency!,
-        data_classification: form.data_classification as Objectives['data_classification'],
-        monthly_budget_amount: form.monthly_budget_amount || undefined,
-        ...numeric,
-      },
-      {
-        ...build.policy,
-        fail_on_unknown: form.fail_on_unknown === 'true',
-        min_resource_confidence: form.min_resource_confidence as Policy['min_resource_confidence'],
-      },
-    );
+    const objectives: Partial<Objectives> = { ...numeric };
+    if (changed('region')) objectives.region = form.region;
+    if (changed('currency')) objectives.currency = form.currency;
+    if (changed('data_classification'))
+      objectives.data_classification =
+        form.data_classification as Objectives['data_classification'];
+    if (changed('monthly_budget_amount'))
+      objectives.monthly_budget_amount = form.monthly_budget_amount || undefined;
+    const policy: Partial<Policy> = {};
+    if (changed('fail_on_unknown')) policy.fail_on_unknown = form.fail_on_unknown === 'true';
+    if (changed('min_resource_confidence'))
+      policy.min_resource_confidence =
+        form.min_resource_confidence as Policy['min_resource_confidence'];
+    onApply(objectives, policy);
+    setEdits({});
   };
 
-  const field = (key: string, label: string, input: React.ReactNode, hint?: string) => (
+  const field = (key: string, label: string, input: React.ReactNode) => (
     <div key={key}>
       <label htmlFor={`${id}-${key}`} className="field-label">
         {label}
       </label>
       {input}
-      {hint ? <p className="hint-text">{hint}</p> : null}
+      {HINTS[key] ? (
+        <p id={`${id}-${key}-hint`} className="hint-text">
+          {HINTS[key]}
+        </p>
+      ) : null}
       {errors[key] ? (
         <p id={`${id}-${key}-err`} className="field-error">
           {errors[key]}
@@ -93,11 +123,19 @@ export function ObjectivesForm({
       ) : null}
     </div>
   );
-  const a11y = (key: string) => ({
-    id: `${id}-${key}`,
-    'aria-invalid': errors[key] ? true : undefined,
-    'aria-describedby': errors[key] ? `${id}-${key}-err` : undefined,
-  });
+  const a11y = (key: string) => {
+    const describedBy = [
+      HINTS[key] ? `${id}-${key}-hint` : null,
+      errors[key] ? `${id}-${key}-err` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return {
+      id: `${id}-${key}`,
+      'aria-invalid': errors[key] ? true : undefined,
+      'aria-describedby': describedBy || undefined,
+    };
+  };
 
   return (
     <form
@@ -116,7 +154,6 @@ export function ObjectivesForm({
           value={form.region}
           onChange={set('region')}
         />,
-        'Demo regions: ' + DEMO_REGIONS.join(', '),
       )}
       <datalist id={`${id}-regions`}>
         {DEMO_REGIONS.map((r) => (
@@ -160,7 +197,6 @@ export function ObjectivesForm({
           value={form.monthly_budget_amount}
           onChange={set('monthly_budget_amount')}
         />,
-        'Checked only with a cost policy that enforces a hard cap, and only against a complete quote.',
       )}
       {NUMERIC.map((n) =>
         field(

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Scope `@typescript-eslint/typescript-estree` to `minimatch` 11.0.1 for the affected development-tooling path in [#338](https://github.com/Pick-Your-AI/pick-your-ai-website/issues/338). Remove the override when a compatible upstream release supplies a patched dependency. The separate ESLint 3.x path remains in the advisory inventory; this is a partial remediation.
+
 - **Builder, catalog and compare rebuilt on a dense "parts list" layer** (`src/styles/dense.css`, `src/components/parts.tsx`) modelled on the PCPartPicker interaction patterns recorded in `docs/research/pcpartpicker-ux-notes.md`: fixed component rows in dependency order with "Choose …" empty states, a status strip carrying the worst outcome plus live estimates, a running total under the table, lettered findings with severity and outcome as words, an explicit "what was not checked" note, a compatibility filter that is on by default with `unknown` as its own bucket, `aria-sort` table headers, active-filter chips, and URL-carried filter state.
 - Compare is now one aligned table (properties as rows, up to three products as columns) with difference markers, slot pickers, and explicit "not recorded" cells instead of blanks. `*_ref` spec values are resolved to the referenced component's name so no internal catalog id is printed.
 - The three pages use compact titles and tables instead of the marketing hero treatment; the marketing pages are unchanged.
@@ -20,6 +22,73 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Privacy, About and saved-build screens describe the configured local or API build store and disclose API analysis requests; removing an API-backed build is clearly identified as a local-only removal.
+- Global, home, builder, catalog, component detail, comparison and saved-build labels no longer describe all HTTP-mode data as synthetic demo data; fixture mode retains its demo labels, and synthetic-tagged HTTP records remain identified.
+- Summary and shared views identify names and synthetic labels as belonging to a different current catalog version; summary cost tables use a neutral caption in HTTP mode.
+- Markdown exports label synthetic catalog records individually and no longer describe HTTP-mode data as wholly synthetic; drifted records are labelled without attributing their provenance to the pinned version.
+- Markdown exports keep user and catalog text within its intended heading or table cell, including names and versions containing markup, pipes or line breaks.
+- Contract-valid timestamps that the browser cannot format, including leap seconds, display their recorded value instead of “Invalid Date” in build and history views. Saved builds sort by actual instants across time-zone offsets and fractional seconds.
+- The JSON preview uses the same portable formatting as downloads, reports import limitations, and cannot copy an error message as if it were JSON.
+- JSON exports use compact formatting when indentation alone would prevent re-import; summary-page exports also show persistent warnings when a downloaded backup cannot be re-imported.
+- Builds imported at the nesting limit can now round-trip through the export envelope and share links.
+- Export warnings remain visible beside the relevant action until dismissed, identify the downloaded file, and return keyboard focus to the export button.
+- Deeply nested imported files and links now show a clear error before they can overflow the browser's stack during editing or saving.
+- Restoring a revision now restores its catalog locks and extension data, including absent optional fields, while preserving the current build's identity and lifecycle metadata; an outdated restore action cannot overwrite a newly opened build.
+- Invalid import metadata no longer crashes build import or shared previews; builds too large for the preview limit no longer produce unusable share links. JSON imports accept files up to 5 MB, independently of the 512 KB link limit. Larger JSON downloads remain available as backups and report that they exceed the import limit.
+- Saved-build recovery can find records missing from a partially intact library index while preserving existing entries and backing up the index. Duplicate index entries no longer create duplicate cards.
+- Storage operations release their Web Lock after synchronous failures on Node 25, allowing subsequent operations to proceed.
+- Open component settings retain unapplied edits and cannot apply them to a selection that was replaced, removed, changed version or became ambiguous.
+- Objective edits update only changed fields and merge policy changes into the latest draft, preserving untouched values and absent policy defaults. Field guidance is associated with its input for screen readers.
+- Component settings preserve untouched values, including empty lists and scopes containing commas; JSON array input supports editing those values without losing whitespace or delimiters.
+- Builder rows identify pinned versions that differ from the current catalog and do not attribute newer billing or evidence to them. Missing catalog selections remain configurable, and revision comparisons show changed pinned versions.
+- The local evaluator excludes catalog records that do not match an enabled selection's pinned kind and version, keeping affected tool and capacity checks unknown instead of using another version's facts.
+- Deployment-mode guidance and cost estimates no longer infer facts from a mismatched catalog record; summary, shared and Markdown views identify unavailable or different versions.
+- Catalog, detail and comparison selection guards distinguish component versions, allowing a current version to replace an older selection without mispricing the existing one. Version replacement confirms before resetting component settings.
+- The home preview prices its selected version rather than borrowing the price of a newer catalog record.
+- Replacement links cannot apply a component to a missing, ambiguous or different-kind slot; invalid replacements leave the draft unchanged.
+- Catalog, component detail and comparison views only use compatibility results for the exact item version; ambiguous or failed results remain unknown.
+- Reevaluate compatibility when cost or capacity evidence changes under the same ID, and withhold the previous report while the new evaluation is pending.
+- Failed analysis refreshes no longer present retained cost, resource evidence or evaluation reports as current.
+- Malformed component links no longer crash catalog or comparison pages; unavailable comparison slots are explained without discarding valid components.
+- Catalog specification sorting keeps missing values last in both directions and orders list-valued fields by their displayed values.
+- Catalog cost sorting keeps complete estimates, partial lower bounds and unknown prices in separate groups in both directions, with exact decimal ordering and accessible sort descriptions.
+- The catalog provides a sorting control on small screens, where the sortable table headers are hidden.
+- Saved-build cards keep known layer counts and prices when compatibility checks are slow or unavailable, while withholding mismatched evaluation results.
+- Saved-build cards load their analysis independently, so a slow build no longer delays the rest of the library; details from a different revision are withheld.
+- Reject API cost estimates with conflicting currencies, and exclude inconsistent cost evidence from local budget checks instead of reporting a misleading result.
+- Cost differences use exact decimal arithmetic and retain sub-cent precision; currency totals also format large and half-cent amounts without binary rounding errors.
+- Build comparisons retain repeated selections, match revisions by selection identity, and show role promotions separately from removals.
+- Saved-build cost sorting groups estimates by coverage, currency and period, and orders comparable decimal amounts exactly; group labels explain the ordering.
+- Late save responses from an earlier draft no longer change the current build pointer or its save status; an older save cannot report a newer pending edit as saved.
+- Rapid edits to the same draft save in revision order. If a save fails, later edits remain in the working draft and can be retried in order without overwriting a conflicting saved revision.
+- The browser warns before leaving while the current draft has a pending or failed save, reducing the chance of losing unsaved edits on reload or close.
+- Starting or opening another build now asks before replacing a draft with unsaved changes; deleting the current build warns when its working draft has unsaved edits.
+- A slow request to open a saved build no longer replaces a newer selection, new draft or subsequent edit when it finishes late.
+- An over-limit name stays available when leaving the builder or starting a new build is cancelled, with a warning before the uncommitted name is discarded.
+- Component settings reject malformed, non-finite and unsafe integer inputs instead of silently changing them, and enforce the contract's exclusive numeric bounds.
+- Settings inputs and validation messages remain legible in light mode's dark dialogs.
+- Unapplied objectives remain in the form when another change creates a build revision; untouched fields continue to reflect the latest build values.
+- The builder warns before discarding unapplied objectives when navigating away, reloading or starting another build; applying or reverting the edits clears the warning.
+- The component settings dialog warns before discarding edits through its close controls or reload; reverting the edits removes the warning.
+- Numeric objectives reject non-decimal and unsafe integers instead of silently changing them; whitespace-only optional fields remain unset.
+- Tool settings flag duplicate allowed scopes before saving, as required by the contract.
+- URI-formatted component settings use the contract validator's URI rules and report invalid values before applying them.
+- Leaving My Builds cancels a pending open action so a late response cannot replace the working draft or redirect the user.
+- Incomplete remote drafts are rejected locally with an explanation instead of sending a snapshot the API contract cannot accept. Local-to-remote draft promotion remains unsupported and is documented in `docs/DATA_INTEGRATION.md`.
+- If a build saves but the browser cannot remember it as current, the builder and library explain how to reopen it and offer a pointer-only retry.
+- A single builder edit no longer queues duplicate saves under React Strict Mode; consecutive edits still persist in order.
+- A build requested while the catalog is loading remains pending through a failed catalog request and opens after a successful retry, without a duplicate fetch.
+- Removing a primary selection now promotes an enabled remaining selection before a disabled one, so primary-based checks continue to see the active component.
+- Open component settings retain edited fields while updating untouched fields from a newer build snapshot, avoiding overwriting newer values on apply.
+- A delayed delete no longer resets a newer working build or cancels an in-flight request to open another build. If the deleted build was edited or the open fails, its draft remains visible and is marked unsaved so it can be copied.
+- Generated visual and Lighthouse reports are excluded from lint and formatting checks.
+- Saved-build deletion checks the confirmed record for changes and refreshes the library on conflict, including for unreadable records. Cooperating tabs use Web Locks where available; localStorage itself is not atomic across non-cooperating tabs.
+- Local build reads, writes, deletes and index recovery share an exclusive browser lock where supported; submitted snapshots are captured before waiting for that lock.
+- The unload warning is installed as soon as a save is queued, including while it waits for another tab's lock.
+- Saved histories with duplicate or out-of-order revisions, a mismatched current head, or future change records are reported as damaged; a valid current head can still be recovered as a copy without changing the original.
+- Saved-history and remote-cache comparisons treat omitted optional values according to their persisted JSON representation, avoiding false conflicts for `undefined` properties.
+- Retries of the same unconfirmed remote write reuse its idempotency key within the current session; concurrent identical accepted responses can share an unchanged local cache entry.
+- Visual regression checks wait for fixture results before capture and allow slower runners time to obtain stable screenshots; the checked-in baselines are unchanged.
 - **Per-item price no longer reports only the first billable meter.** A component can have several applicable meters (a model has input and output token rates), and the register showed the first line as if it were the whole monthly price. All lines are now summed with the estimator's exact decimal arithmetic, a partly-priced component is labelled a lower bound, and the build policy decides free/included admission rather than the item's billing class alone.
 - **No invented evidence expiry.** The register derived a `stale` flag from `days > 30` and the methodology page claimed a 30-day warning. Research #41 adopts no time-to-live: an evidence date is descriptive, and a version-pinned fact does not expire with age. Age-derived staleness is removed; `evidenceDateLabel` (`src/domain/freshness.ts`) presents the date and its basis (latest recorded source check, or item update).
 - **Historical `verified` labels are no longer presented as current independent verification.** The strongest recorded provenance status is shown as `Recorded: verified` with its caveat, because the label may record a source check only. Extracted to `src/features/builder/evidence.ts`.

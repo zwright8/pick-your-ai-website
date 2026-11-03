@@ -11,9 +11,9 @@
  * reachable from their group header, so the table stays as short as the build actually is.
  */
 import '../../styles/dense.css';
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
-import type { BuildSnapshot, CatalogItem, ComponentKind, Tier } from '../../contracts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useBlocker, useNavigate } from 'react-router';
+import type { BuildSnapshot, CatalogItem, ComponentKind, Selection, Tier } from '../../contracts';
 import { KIND_LABELS, kindDef, kindsInTier } from '../../contracts';
 import type { BuildContext } from '../../domain/activation';
 import { KIND_NEED_LABEL, buildContext, coverage, kindNeed } from '../../domain/activation';
@@ -24,12 +24,20 @@ import {
   updateObjectives,
   updateSettings,
 } from '../../domain/build';
-import { canExport, encodeShareFragment, exportBuild, exportFileName } from '../../domain/share';
+import { MAX_BUILD_NAME_CODEPOINTS } from '../../domain/build-name';
+import {
+  canExport,
+  encodeShareFragment,
+  exportBuildJson,
+  exportFileImportProblem,
+  exportFileName,
+} from '../../domain/share';
 import { useBuilder } from '../../app/builder-context';
 import { useData } from '../../app/data-context';
 import { useBuildAnalysis, useCatalog, usePricebook, useRuleset } from '../../app/queries';
 import { ErrorState, Loading, Modal, useToast } from '../../components/feedback';
 import { Icon } from '../../components/icon';
+import { SyntheticBadge } from '../../components/status';
 import { Findings, Money, NotEvaluated, PartsHead, StatusStrip } from '../../components/parts';
 import { flaggedFindings, costHeadline } from './analysis';
 import { evidenceLine } from './evidence';
@@ -37,11 +45,13 @@ import { incompleteBuild } from './incomplete';
 import { itemPrice } from '../../lib/item-cost';
 import { kindPath, rowSubtitle } from '../../lib/catalog-view';
 import { settingsFields } from '../../lib/schema-fields';
+import { formatRecordedDate } from '../../lib/date-format';
 import { LAYERS, itemLogo, layerOf } from '../../lib/layers';
 import { download } from './BuildToolbar';
 import { ObjectivesForm } from './ObjectivesForm';
 import { SettingsForm } from './SettingsForm';
-import { BuilderLoading, BUILDER_DESCRIPTION } from './BuilderLoading';
+import { BuilderLoading, builderDescription } from './BuilderLoading';
+import { ExportWarning, type ExportWarningData } from '../builds/ExportWarning';
 
 function GroupRow({
   tier,
@@ -88,8 +98,11 @@ function GroupRow({
 }
 
 function ComponentRow({
+  dataMode,
   kind,
   selectionId,
+  catalogId,
+  pinnedVersion,
   item,
   price,
   enabled,
@@ -98,8 +111,11 @@ function ComponentRow({
   onToggleEnabled,
   onRemove,
 }: {
+  dataMode: 'fixture' | 'http';
   kind: ComponentKind;
   selectionId: string;
+  catalogId: string;
+  pinnedVersion: string;
   item: CatalogItem | undefined;
   price: ReturnType<typeof itemPrice> | undefined;
   /** A disabled selection is still part of the saved build: it must stay visible and manageable. */
@@ -110,7 +126,8 @@ function ComponentRow({
   onToggleEnabled: () => void;
   onRemove: () => void;
 }) {
-  const evidence = item ? evidenceLine(item) : undefined;
+  const versionMismatch = Boolean(item && item.version !== pinnedVersion);
+  const evidence = item && !versionMismatch ? evidenceLine(item) : undefined;
   const logo = item ? itemLogo(item) : undefined;
   const name = item?.name ?? KIND_LABELS[kind];
   return (
@@ -132,7 +149,21 @@ function ComponentRow({
           {item ? (
             <span>
               <Link to={`${kindPath(kind)}/${item.id.replace(/\./g, '~')}`}>{item.name}</Link>
-              {rowSubtitle(item) ? <span className="pt-sub">{rowSubtitle(item)}</span> : null}
+              {dataMode === 'http' && item.tags?.includes('synthetic') ? (
+                versionMismatch ? (
+                  <span className="pt-sub">Current catalog record is synthetic.</span>
+                ) : (
+                  <SyntheticBadge />
+                )
+              ) : null}
+              {versionMismatch ? (
+                <span className="pt-sub">
+                  Selected version: {pinnedVersion}. Current catalog version: {item.version}; the
+                  linked record may differ.
+                </span>
+              ) : rowSubtitle(item) ? (
+                <span className="pt-sub">{rowSubtitle(item)}</span>
+              ) : null}
               {enabled ? null : (
                 <span className="pchip pchip-unknown">Disabled — excluded from checks</span>
               )}
@@ -143,12 +174,23 @@ function ComponentRow({
               ) : null}
             </span>
           ) : (
-            <span className="dim">{selectionId}</span>
+            <span>
+              <span className="dim">{catalogId}</span>{' '}
+              <span className="pchip pchip-unknown">Not in this catalog</span>
+              <span className="pt-sub">Selected version: {pinnedVersion}</span>
+              {addAnother ? (
+                <Link className="pt-sub" to={`${kindPath(kind)}?add=1`}>
+                  <Icon name="plus" /> Add another {KIND_LABELS[kind].toLowerCase()}
+                </Link>
+              ) : null}
+            </span>
           )}
         </div>
       </td>
       <td data-label="Cost basis">
-        {item ? (
+        {versionMismatch ? (
+          <span className="dim">Not available for selected version</span>
+        ) : item ? (
           <span className={item.billing_class === 'unknown' ? 'pchip pchip-unknown' : 'pchip'}>
             {item.billing_class}
           </span>
@@ -157,7 +199,9 @@ function ComponentRow({
         )}
       </td>
       <td data-label="Evidence">
-        {evidence ? (
+        {versionMismatch ? (
+          <span className="dim">Not available for selected version</span>
+        ) : evidence ? (
           <span className="pchip" title={evidence.detail}>
             {evidence.label}
           </span>
@@ -278,6 +322,27 @@ function EmptyRow({ kind, onChoose }: { kind: ComponentKind; onChoose: () => voi
   );
 }
 
+interface ConfigureSession {
+  buildId: string;
+  selection: Selection;
+}
+
+function currentConfiguredSelection(
+  build: BuildSnapshot,
+  session: ConfigureSession,
+): Selection | undefined {
+  if (build.id !== session.buildId) return undefined;
+  const matches = build.selections.filter((selection) => selection.id === session.selection.id);
+  if (matches.length !== 1) return undefined;
+  const current = matches[0];
+  return current &&
+    current.kind === session.selection.kind &&
+    current.catalog_item_id === session.selection.catalog_item_id &&
+    current.catalog_item_version === session.selection.catalog_item_version
+    ? current
+    : undefined;
+}
+
 export default function BuilderPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -290,20 +355,59 @@ export default function BuilderPage() {
   const analysis = useBuildAnalysis(build);
 
   const [name, setName] = useState<string | null>(null);
-  const [configure, setConfigure] = useState<string | null>(null);
+  const nameComposing = useRef(false);
+  const [configure, setConfigure] = useState<ConfigureSession | null>(null);
+  const [configureError, setConfigureError] = useState(false);
   const [jsonOpen, setJsonOpen] = useState(false);
+  const [exportWarning, setExportWarning] = useState<ExportWarningData | null>(null);
+  const exportRef = useRef<HTMLButtonElement>(null);
   const [objectivesMounted, setObjectivesMounted] = useState(false);
+  const [objectivesDirty, setObjectivesDirty] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const nameTooLong = Array.from((name ?? '').trim()).length > MAX_BUILD_NAME_CODEPOINTS;
+  const unappliedChanges = nameTooLong || objectivesDirty || settingsDirty;
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      unappliedChanges && currentLocation.pathname !== nextLocation.pathname,
+  );
+  const handledBlock = useRef(false);
+  useEffect(() => {
+    if (blocker.state !== 'blocked') {
+      handledBlock.current = false;
+      return;
+    }
+    if (handledBlock.current) return;
+    handledBlock.current = true;
+    if (window.confirm('You have unapplied changes. Leave without applying them?')) {
+      blocker.proceed();
+    } else {
+      blocker.reset();
+    }
+  }, [blocker]);
+  useEffect(() => {
+    if (!unappliedChanges) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = true;
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unappliedChanges]);
 
   const byId = catalog.byId;
   const ctx = useMemo(() => (build ? buildContext(build, byId) : undefined), [build, byId]);
   const cov = useMemo(() => (build && ctx ? coverage(build, ctx) : undefined), [build, ctx]);
 
   const jsonPreview = useMemo(() => {
-    if (!jsonOpen || !build) return '';
+    if (!jsonOpen || !build) return null;
     try {
-      return JSON.stringify(exportBuild(build, mode), null, 2);
+      const text = exportBuildJson(build, mode);
+      return { ok: true, text, problem: exportFileImportProblem(text) } as const;
     } catch (e) {
-      return e instanceof Error ? e.message : String(e);
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : 'Could not prepare JSON.',
+      } as const;
     }
   }, [jsonOpen, build, mode]);
 
@@ -350,8 +454,9 @@ export default function BuilderPage() {
       ? [...new Set([...lastChange.affectedKinds, ...lastChange.changedKinds])]
       : [];
 
-  const commitName = () => {
-    const next = (name ?? build.name).trim();
+  const commitName = (value: string) => {
+    const next = value.trim();
+    if (Array.from(next).length > MAX_BUILD_NAME_CODEPOINTS) return;
     setName(null);
     if (next && next !== build.name)
       apply((b) => rename(b, next), `Renamed build to "${next}"`, []);
@@ -370,8 +475,12 @@ export default function BuilderPage() {
       toast(problem);
       return;
     }
-    download(exportFileName(build), JSON.stringify(exportBuild(build, mode), null, 2) + '\n');
-    toast('Configuration exported as JSON.');
+    const json = exportBuildJson(build, mode);
+    const filename = exportFileName(build);
+    download(filename, json);
+    const importProblem = exportFileImportProblem(json);
+    if (importProblem) setExportWarning({ filename, problem: importProblem });
+    else toast('Configuration exported as JSON.');
   };
 
   const share = async () => {
@@ -396,12 +505,20 @@ export default function BuilderPage() {
     }
   };
 
-  const configureSelection = configure
-    ? build.selections.find((s) => s.id === configure)
-    : undefined;
-  const configureItem = configureSelection
+  const currentSelection = configure ? currentConfiguredSelection(build, configure) : undefined;
+  const configureSelection = configure ? (currentSelection ?? configure.selection) : undefined;
+  const configureChanged = Boolean(configure && (!currentSelection || configureError));
+  const configureCandidate = configureSelection
     ? byId.get(configureSelection.catalog_item_id)
     : undefined;
+  const configureItem =
+    configureCandidate?.kind === configureSelection?.kind ? configureCandidate : undefined;
+  const closeSettings = () => {
+    if (settingsDirty && !window.confirm('Discard unapplied component settings?')) return;
+    setSettingsDirty(false);
+    setConfigureError(false);
+    setConfigure(null);
+  };
 
   /**
    * Rows for one tier: every selected component — enabled *or* disabled, because a disabled
@@ -422,13 +539,17 @@ export default function BuilderPage() {
       }
       const many = kindDef(kind).cardinality === 'many';
       selections.forEach((selection, index) => {
-        const item = byId.get(selection.catalog_item_id);
+        const candidate = byId.get(selection.catalog_item_id);
+        const item = candidate?.kind === selection.kind ? candidate : undefined;
         const name = item?.name ?? selection.catalog_item_id;
         rows.push(
           <ComponentRow
+            dataMode={mode}
             key={selection.id}
             kind={kind}
             selectionId={selection.id}
+            catalogId={selection.catalog_item_id}
+            pinnedVersion={selection.catalog_item_version}
             item={item}
             price={
               item && selection.enabled
@@ -437,7 +558,10 @@ export default function BuilderPage() {
             }
             enabled={selection.enabled}
             addAnother={many && index === selections.length - 1}
-            onConfigure={() => setConfigure(selection.id)}
+            onConfigure={() => {
+              setConfigureError(false);
+              setConfigure({ buildId: build.id, selection });
+            }}
             onToggleEnabled={() => {
               const next = !selection.enabled;
               apply(
@@ -469,7 +593,7 @@ export default function BuilderPage() {
             </>
           }
           title="Choose your parts"
-          description={BUILDER_DESCRIPTION}
+          description={builderDescription(mode)}
           actions={
             <>
               <button type="button" className="pbtn" onClick={() => setJsonOpen(true)}>
@@ -478,12 +602,27 @@ export default function BuilderPage() {
               <button type="button" className="pbtn" onClick={() => void share()}>
                 <Icon name="copy" /> Copy share link
               </button>
-              <button type="button" className="pbtn pbtn-primary" onClick={exportJson}>
+              <button
+                ref={exportRef}
+                type="button"
+                className="pbtn pbtn-primary"
+                onClick={exportJson}
+              >
                 <Icon name="download" /> Export
               </button>
             </>
           }
         />
+
+        {exportWarning ? (
+          <ExportWarning
+            warning={exportWarning}
+            onDismiss={() => {
+              setExportWarning(null);
+              requestAnimationFrame(() => exportRef.current?.focus());
+            }}
+          />
+        ) : null}
 
         {/* Toolbar: name, state, local-first actions (research §3.9). */}
         <div className="pbar">
@@ -492,13 +631,22 @@ export default function BuilderPage() {
             <input
               aria-label="Build name"
               className="pbar-input"
-              maxLength={160}
               type="text"
               value={name ?? build.name}
+              aria-invalid={nameTooLong || undefined}
+              aria-describedby={nameTooLong ? 'build-name-error' : undefined}
               onChange={(e) => setName(e.target.value)}
-              onBlur={commitName}
+              onCompositionStart={() => {
+                nameComposing.current = true;
+              }}
+              onCompositionEnd={() => {
+                nameComposing.current = false;
+              }}
+              onBlur={(e) => commitName(e.currentTarget.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') commitName();
+                if (e.key === 'Enter' && !nameComposing.current && !e.nativeEvent.isComposing) {
+                  commitName(e.currentTarget.value);
+                }
               }}
             />
             <span className="pbar-meta">
@@ -510,7 +658,14 @@ export default function BuilderPage() {
               type="button"
               className="pbtn"
               onClick={() => {
-                startNew();
+                if (
+                  unappliedChanges &&
+                  !window.confirm('This build has unsaved or unapplied changes. Replace it anyway?')
+                )
+                  return;
+                if (startNew(undefined, undefined, unappliedChanges) === false) return;
+                setName(null);
+                setObjectivesDirty(false);
                 toast('New blank build created.');
               }}
             >
@@ -524,6 +679,13 @@ export default function BuilderPage() {
             </Link>
           </div>
         </div>
+
+        {nameTooLong ? (
+          <p id="build-name-error" className="field-error" role="alert">
+            Build names can have at most {MAX_BUILD_NAME_CODEPOINTS} characters. Shorten the name to
+            save it.
+          </p>
+        ) : null}
 
         <StatusStrip
           outcome={outcome}
@@ -567,10 +729,28 @@ export default function BuilderPage() {
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className={saveState?.status === 'error' ? 'pnotice pbox-save-error' : undefined}
+          className={
+            saveState?.status === 'error' || (saveState?.status === 'saved' && saveState.warning)
+              ? 'pnotice pbox-save-error'
+              : undefined
+          }
         >
-          {saveState?.status === 'error' ? `Not saved: ${saveState.message}` : ''}
+          {saveState?.status === 'error'
+            ? `Not saved: ${saveState.message}`
+            : saveState?.status === 'saved'
+              ? (saveState.warning ?? '')
+              : ''}
         </div>
+        {saveState?.status === 'error' && saveState.retry ? (
+          <button type="button" className="pbtn save-retry" onClick={saveState.retry}>
+            Retry saving
+          </button>
+        ) : null}
+        {saveState?.status === 'saved' && saveState.retryCurrent ? (
+          <button type="button" className="pbtn save-retry" onClick={saveState.retryCurrent}>
+            Retry remembering current build
+          </button>
+        ) : null}
 
         <p className="sr-only" aria-live="polite" role="status">
           {announcement}
@@ -665,12 +845,16 @@ export default function BuilderPage() {
             <small>
               {total
                 ? total.coverage === 'complete'
-                  ? `/${total.period_days} days · synthetic estimate`
+                  ? `/${total.period_days} days · ${mode === 'fixture' ? 'synthetic estimate' : 'estimate'}`
                   : `/${total.period_days} days · lower bound, ${total.unpriced_selection_ids.length} unpriced`
                 : 'nothing priced yet'}
             </small>
           </div>
-          <span className="pbar-meta">Not a quote · synthetic demo pricebook</span>
+          <span className="pbar-meta">
+            {mode === 'fixture'
+              ? 'Not a quote · synthetic demo pricebook'
+              : 'Estimated baseline · not a quote'}
+          </span>
         </div>
 
         <div className="parts-sections">
@@ -769,11 +953,17 @@ export default function BuilderPage() {
             <div className="pdetails-body">
               {objectivesMounted ? (
                 <ObjectivesForm
-                  key={`${build.id}-${build.revision}`}
+                  key={build.id}
                   build={build}
+                  onDirtyChange={setObjectivesDirty}
                   onApply={(objectives, policy) =>
                     apply(
-                      (b) => ({ ...updateObjectives(b, objectives), policy }),
+                      (b) => {
+                        const updated = updateObjectives(b, objectives);
+                        return Object.keys(policy).length
+                          ? { ...updated, policy: { ...b.policy, ...policy } }
+                          : updated;
+                      },
                       'Updated build objectives',
                       ['workload', 'cost_policy', 'hosting_platform', 'deployment_target'],
                     )
@@ -794,7 +984,7 @@ export default function BuilderPage() {
                     <span className="mono">r{c.revision}</span>
                     <span>{c.summary}</span>
                     <time className="dim" dateTime={c.at}>
-                      {new Date(c.at).toLocaleString()}
+                      {formatRecordedDate(c.at, 'date-time')}
                     </time>
                     {c.revision !== build.revision &&
                     draft.revisions.some((r) => r.revision === c.revision) ? (
@@ -818,38 +1008,88 @@ export default function BuilderPage() {
       <Modal
         open={jsonOpen}
         title="Your build configuration"
-        subtitle="Portable JSON manifest · contract BuildSnapshot"
+        subtitle="Exported build in JSON format"
         onClose={() => setJsonOpen(false)}
         primaryLabel="Copy JSON"
-        onPrimary={() => {
-          void navigator.clipboard
-            .writeText(jsonPreview)
-            .then(() => toast('Configuration JSON copied'))
-            .catch(() => toast('Copy was blocked by this browser.'));
-        }}
+        onPrimary={
+          jsonPreview?.ok
+            ? () => {
+                void (async () => {
+                  try {
+                    await navigator.clipboard.writeText(jsonPreview.text);
+                    toast('Configuration JSON copied');
+                  } catch {
+                    toast('Copy was blocked by this browser.');
+                  }
+                })();
+              }
+            : undefined
+        }
       >
-        <pre id="jsonPreview">{jsonPreview}</pre>
+        {jsonPreview?.ok ? (
+          <>
+            {jsonPreview.problem ? (
+              <p className="notice-error json-preview-warning" role="alert">
+                This JSON cannot be re-imported. {jsonPreview.problem} You can still copy it as a
+                backup.
+              </p>
+            ) : null}
+            <pre id="jsonPreview">{jsonPreview.text}</pre>
+          </>
+        ) : jsonPreview ? (
+          <p className="notice-error json-preview-warning" role="alert">
+            {jsonPreview.message}
+          </p>
+        ) : null}
       </Modal>
 
       <Modal
-        open={Boolean(configureSelection && configureItem)}
-        title={configureItem ? `Configure ${configureItem.name}` : 'Configure component'}
-        subtitle="Contract settings for this selection"
-        onClose={() => setConfigure(null)}
+        open={Boolean(configureSelection)}
+        title={
+          configureItem
+            ? `Configure ${configureItem.name}`
+            : configureSelection
+              ? `Configure ${KIND_LABELS[configureSelection.kind]}`
+              : 'Configure component'
+        }
+        subtitle={
+          configureSelection &&
+          configureItem &&
+          configureSelection.catalog_item_version !== configureItem.version
+            ? `Contract settings for selected version ${configureSelection.catalog_item_version}; the catalog record may differ.`
+            : 'Contract settings for this selection'
+        }
+        onClose={closeSettings}
       >
-        {configureSelection && configureItem ? (
+        {configureChanged ? (
+          <p className="notice-error" role="alert">
+            The selection changed while settings were open. Your edits remain here; copy any needed
+            values before closing, then reopen settings for the current selection.
+          </p>
+        ) : null}
+        {configureSelection ? (
           <SettingsForm
             kind={configureSelection.kind as ComponentKind}
             values={configureSelection.settings as Record<string, unknown>}
-            onCancel={() => setConfigure(null)}
+            onDirtyChange={setSettingsDirty}
+            onCancel={closeSettings}
+            disabledSubmit={configureChanged}
             onApply={(patch) => {
-              apply(
+              if (!configure) return false;
+              const accepted = apply(
                 (b) => updateSettings(b, configureSelection.id, patch),
                 `Changed ${KIND_LABELS[configureSelection.kind]} settings`,
                 [configureSelection.kind],
+                (b) => Boolean(currentConfiguredSelection(b, configure)),
               );
+              if (accepted === false) {
+                setConfigureError(true);
+                return false;
+              }
+              setSettingsDirty(false);
               setConfigure(null);
               toast('Settings updated. Rules were re-evaluated.');
+              return true;
             }}
           />
         ) : null}

@@ -10,7 +10,8 @@ import { layerOf } from './layers';
  * "~" in place of "." (a character the contract id pattern never uses).
  */
 export const idToSlug = (id: string) => id.replace(/\./g, '~');
-export const slugToId = (slug: string) => decodeURIComponent(slug).replace(/~/g, '.');
+// Router params and URLSearchParams have already decoded their values exactly once.
+export const slugToId = (slug: string) => slug.replace(/~/g, '.');
 
 export const kindPath = (kind: ComponentKind) => `/catalog/${kindSlug(kind)}`;
 export const itemPath = (item: Pick<CatalogItem, 'id' | 'kind'>) =>

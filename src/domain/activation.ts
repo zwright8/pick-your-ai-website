@@ -36,7 +36,9 @@ export function buildContext(
   const modeSel = primarySelection(build, 'deployment_mode');
   const modeItem = modeSel ? catalog.get(modeSel.catalog_item_id) : undefined;
   const mode =
-    modeItem?.kind === 'deployment_mode'
+    modeSel &&
+    modeItem?.kind === 'deployment_mode' &&
+    modeItem.version === modeSel.catalog_item_version
       ? ((modeItem.spec as { mode: DeploymentModeValue }).mode ?? undefined)
       : undefined;
   const target = primarySelection(build, 'deployment_target');

@@ -11,6 +11,27 @@ import { evaluateBuild } from '../domain/evaluator';
 import { itemFreshness } from '../domain/freshness';
 import type { CompatibleOption, EvidenceProvider, ItemEvidence } from './types';
 
+/** Hide a record from local rule evaluation if an enabled selection pins another kind or version. */
+export function catalogForBuildEvidence(
+  build: BuildSnapshot,
+  snapshot: CatalogSnapshot,
+): CatalogSnapshot {
+  const byId = new Map(snapshot.items.map((item) => [item.id, item]));
+  const unavailable = new Set(
+    build.selections.flatMap((selection) => {
+      if (!selection.enabled) return [];
+      const item = byId.get(selection.catalog_item_id);
+      return item &&
+        (item.kind !== selection.kind || item.version !== selection.catalog_item_version)
+        ? [selection.catalog_item_id]
+        : [];
+    }),
+  );
+  return unavailable.size
+    ? { ...snapshot, items: snapshot.items.filter((item) => !unavailable.has(item.id)) }
+    : snapshot;
+}
+
 const RANK: Record<Provenance['verification_status'], number> = {
   unverified: 0,
   estimated: 1,
@@ -61,7 +82,7 @@ export function compatibleOptionsLocal(
   const evaluate = (b: BuildSnapshot) =>
     evaluateBuild({
       build: b,
-      catalog: snapshot,
+      catalog: catalogForBuildEvidence(b, snapshot),
       ruleset: scoped,
       resourceEstimate: null,
       costEstimate: null,

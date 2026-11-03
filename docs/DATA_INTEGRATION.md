@@ -43,6 +43,13 @@ The website never edits research data. It reads published, immutable revisions a
 
 The HTTP providers also check revision scoping: an evaluation or quote for a different `build_revision` is rejected as malformed.
 
+The local repository checks saved revisions on writes and checks the confirmed record on deletion.
+Where Web Locks is available, cooperating tabs serialize repository operations under a shared
+exclusive lock. Browsers without Web Locks, older copies of the app and other scripts that write
+directly to `localStorage` do not participate; `localStorage` itself does not provide an atomic
+compare-and-write or compare-and-delete across tabs. Use one editing tab when those fallback cases
+matter. Remote update atomicity is a server contract and requires a conforming API.
+
 ## 3. Configuration and feature flags
 
 Set these at build time (Vite `VITE_*` variables, baked into the static bundle):
@@ -55,7 +62,14 @@ Set these at build time (Vite `VITE_*` variables, baked into the static bundle):
 | `VITE_PRICEBOOK_ID`     | pricebook id        | build lock | Optional                                                                                                 |
 | `VITE_BUILD_STORE`      | `local` \| `http`   | `local`    | Store builds on the API instead of in the browser                                                        |
 
-`dist/version.json` records `dataMode`, and the footer shows it. In `http` mode the demo banner disappears, but synthetic tags on any item still render.
+`dist/version.json` records `dataMode`, and the footer shows it. In `http` mode the banner identifies the configured API instead of describing every record as demo data; synthetic tags on individual items still render.
+
+**Remote draft limitation:** Do not enable `VITE_BUILD_STORE=http` for the blank-builder flow yet. The v1 `BuildSnapshot` requires at least two selections, while a new blank draft has none. The API creates revision 1 and requires each update to use the next revision, so locally accumulating incomplete revisions and later uploading the head cannot be treated as a compatible remote history. An incomplete remote save is rejected locally with an explanation; the working draft remains unsaved. Use the local build store for blank and incomplete drafts. Complete templates can start a remote build. Supporting a local-to-remote transition requires an explicit identity, revision-history and conflict design; the current implementation does not perform that transition.
+
+For a remote write whose outcome is not confirmed, retries of the same request reuse its
+idempotency key within the current app session. This depends on the API honoring that key; keys are
+not persisted across reloads. A changed payload uses a different key, and a local cache conflict is
+still reported rather than overwritten.
 
 **Hosting change required for `http` mode.** The production CSP is `connect-src 'self'`. Pointing at an API on another origin needs that origin added to `public/.htaccess`, which operations owns. Alternatively, serve the API under the same origin, for example `https://pickyour.ai/v1`.
 
@@ -100,7 +114,7 @@ The endpoints the UI needs all exist in openapi v1, except these gaps. The accep
 ## 8. Research decisions still requiring integration or owner disposition
 
 - Freshness policy ([#41](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/41)): [merged PR #127](https://github.com/Pick-Your-AI/pick-your-ai-research/pull/127) and its [scoped T4 receipt](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/41#issuecomment-6242626857) adopt no TTL. Pinned facts do not expire by age; hosted current-state facts use capture-date versions and retained snapshots. A newer snapshot alone does not invalidate a build. The website now displays capture dates without age-based freshness claims; the 30-day preview warning at `dc66a9e` is historical. Item revision mismatches, missing items, build schema mismatches and explicit price validity remain separate checks; the completed #39/#41 research and its named implementation follow-ups govern price-specific refresh/invalidation rather than an invented website policy.
-- Implement the completed cost research ([#39](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/39)): preserve source currency and explicit budget currency, with no automatic FX or region/account fallback. Applicable quotes and complete priced coverage remain separate evidence requirements. The site's preview estimator is provisional.
+- Implement the completed cost research ([#39](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/39)): preserve source currency and explicit budget currency, with no automatic FX or region/account fallback. Applicable quotes and complete priced coverage remain separate evidence requirements. The site's preview estimator is provisional. The HTTP client rejects an estimate if its subtotal, tax, total, line amount or unit price uses a different currency from the estimate; this is a client-side evidence check beyond the v1 schema, not an automatic conversion.
 - Implement the completed sharing/privacy research from [#42](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/42) under [website #17](https://github.com/Pick-Your-AI/pick-your-ai-website/issues/17). Both #42 and its #40 research prerequisite are completed; the site's share links remain a local-only preview. Their research completion adopts no hosted retention period and supplies no deployed accounts, persistence or authorization service.
 - The merged memory record (PR [#72](https://github.com/Pick-Your-AI/pick-your-ai-research/pull/72)) documents capability-evidence gaps in `rule.memory.framework.compatibility`; policy changes still require a reviewed contract version.
 - Deployment-mode research ([#3](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/3), received in [#42](https://github.com/Pick-Your-AI/pick-your-ai-research/issues/42)): the [accepted record](https://github.com/Pick-Your-AI/pick-your-ai-research/blob/9db556b7fca485c8eb4396f9ee2ceeacdc119d79/research/T0-configuration/saved-shared-builds.md) classifies components by operator and capacity placement. Any required unresolved component makes the aggregate unknown; otherwise a common mode stays that mode and mixed modes aggregate to hybrid. Encoding and adopting this model require a successor contract and client implementation; the website retains frozen v1 behavior.

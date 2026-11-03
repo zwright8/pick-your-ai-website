@@ -141,7 +141,7 @@ export function estimateCost(
 
   for (const sel of build.selections.filter((s) => s.enabled)) {
     const item = catalog.get(sel.catalog_item_id);
-    if (!item || item.version !== sel.catalog_item_version) {
+    if (!item || item.kind !== sel.kind || item.version !== sel.catalog_item_version) {
       unpriced.add(sel.id);
       warnings.push(
         `${sel.id}: catalog item ${sel.catalog_item_id}@${sel.catalog_item_version} not found in the snapshot.`,

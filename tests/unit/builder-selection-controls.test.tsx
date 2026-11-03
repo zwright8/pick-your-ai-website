@@ -9,7 +9,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { createMemoryRouter, RouterProvider } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { useBuilder } from '../../src/app/builder-context';
 import { DataContext } from '../../src/app/data-context';
@@ -50,14 +50,20 @@ function show(
     restore,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const router = createMemoryRouter([
+    {
+      path: '*',
+      element: (
+        <ToastProvider>
+          <BuilderPage />
+        </ToastProvider>
+      ),
+    },
+  ]);
   const view = render(
     <QueryClientProvider client={client}>
       <DataContext.Provider value={providers}>
-        <MemoryRouter>
-          <ToastProvider>
-            <BuilderPage />
-          </ToastProvider>
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </DataContext.Provider>
     </QueryClientProvider>,
   );
@@ -65,6 +71,69 @@ function show(
 }
 
 describe('builder selection controls', () => {
+  it('merges objective and policy edits into the latest draft', async () => {
+    const initial = apiChat();
+    const { apply } = show(initial);
+    await userEvent.click(await screen.findByText('Objectives and policy'));
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Treat any unknown as blocking' }),
+      'true',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Apply objectives' }));
+    const [change] = apply.mock.calls[0] as [(build: BuildSnapshot) => BuildSnapshot];
+    const latest = {
+      ...initial,
+      objectives: { ...initial.objectives, requests_per_day: 9876 },
+      policy: { ...initial.policy, allow_unverified_catalog_items: false },
+    };
+    const result = change(latest);
+    expect(result.objectives.requests_per_day).toBe(9876);
+    expect(result.policy).toMatchObject({
+      allow_unverified_catalog_items: false,
+      fail_on_unknown: true,
+    });
+  });
+
+  it('labels a version mismatch and withholds current-version evidence from the pinned selection', async () => {
+    const build = apiChat();
+    build.selections = build.selections.map((selection) =>
+      selection.id === 'sel_model'
+        ? { ...selection, catalog_item_version: 'older-version' }
+        : selection,
+    );
+    show(build);
+    const row = await screen.findByRole('row', { name: /Demo Aurora Large/ });
+    expect(row).toHaveTextContent('Selected version: older-version');
+    expect(row).toHaveTextContent(
+      `Current catalog version: ${item('model', 'aurora-large').version}`,
+    );
+    expect(row.querySelector('[data-label="Cost basis"]')).toHaveTextContent(
+      'Not available for selected version',
+    );
+    expect(row.querySelector('[data-label="Evidence"]')).toHaveTextContent(
+      'Not available for selected version',
+    );
+    expect(row.querySelector('[data-label="Est. cost"]')).toHaveTextContent('Unknown');
+    await userEvent.click(within(row).getByRole('button', { name: /Configure Demo Aurora Large/ }));
+    const dialog = await screen.findByRole('dialog', { name: /Configure Demo Aurora Large/ });
+    expect(dialog).toHaveTextContent('selected version older-version');
+  });
+
+  it('allows configuring a selection whose catalog record is missing', async () => {
+    const build = apiChat();
+    build.selections = build.selections.map((selection) =>
+      selection.id === 'sel_model'
+        ? { ...selection, catalog_item_id: 'demo.model.removed' }
+        : selection,
+    );
+    show(build);
+    const row = await screen.findByRole('row', { name: /demo\.model\.removed/ });
+    expect(row).toHaveTextContent('Not in this catalog');
+    expect(within(row).getByRole('link', { name: /Add another AI model/i })).toBeVisible();
+    await userEvent.click(within(row).getByRole('button', { name: /Configure AI Model/ }));
+    expect(await screen.findByRole('dialog', { name: /Configure AI Model/ })).toBeVisible();
+  });
+
   it('shows pricing failures and recovers through the retry control', async () => {
     const providers = createFixtureProviders({ now: () => NOW });
     const estimate = providers.pricing.estimate.bind(providers.pricing);

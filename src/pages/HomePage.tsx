@@ -66,14 +66,15 @@ function Hero() {
                  * unconfigured stack must read as Incomplete rather than arriving pre-filled with
                  * someone else's choices. Choosing a starter stays an explicit action on /templates.
                  */
-                startNew();
+                if (startNew() === false) return;
                 void navigate('/builder');
               }}
             >
               Build your AI stack <Icon name="arrow-right" />
             </button>
-            <Link className="btn btn-outline" to="/templates">
-              Explore starter builds <Icon name="arrow-up-right" />
+            <Link className="btn btn-outline" to={mode === 'fixture' ? '/templates' : '/catalog'}>
+              {mode === 'fixture' ? 'Explore starter builds' : 'Browse components'}{' '}
+              <Icon name="arrow-up-right" />
             </Link>
           </div>
           <div className="hero-trust">
@@ -105,7 +106,8 @@ function HeroPreview() {
   const analysis = useBuildAnalysis(build);
 
   const rows = build.selections.map((sel) => {
-    const item = catalog.byId.get(sel.catalog_item_id);
+    const candidate = catalog.byId.get(sel.catalog_item_id);
+    const item = candidate?.kind === sel.kind ? candidate : undefined;
     const tier = kindDef(sel.kind).tier;
     return {
       id: sel.id,
@@ -113,7 +115,12 @@ function HeroPreview() {
       icon: TIER_ICON[tier] ?? 'layers',
       name: item?.name ?? sel.catalog_item_id,
       kind: KIND_LABELS[sel.kind],
-      price: item ? itemPrice(item, build, catalog.byId, pricebook.data).label : 'Unknown',
+      versionNote: !item
+        ? `Not in the current catalog; selected version ${sel.catalog_item_version}`
+        : item.version !== sel.catalog_item_version
+          ? `Selected version ${sel.catalog_item_version}; catalog version ${item.version}`
+          : null,
+      price: item ? itemPrice(item, build, catalog.byId, pricebook.data, sel).label : 'Unknown',
     };
   });
   const total = costShort(analysis.costIsCurrent ? analysis.cost : undefined);
@@ -162,6 +169,7 @@ function HeroPreview() {
                 <strong>{row.name}</strong>
                 <small>
                   {row.tier} · {row.kind.toUpperCase()}
+                  {row.versionNote ? ` · ${row.versionNote}` : ''}
                 </small>
               </div>
               <span className="preview-price">{row.price}</span>
@@ -224,7 +232,7 @@ function StarterCard({ starter, index }: { starter: Starter; index: number }) {
       className="template-card"
       type="button"
       onClick={() => {
-        startNew(starter.build(), starter.title);
+        if (startNew(starter.build(), starter.title) === false) return;
         void navigate('/builder');
       }}
     >
@@ -276,6 +284,7 @@ function Templates() {
 }
 
 function CatalogRows() {
+  const { mode } = useData();
   const catalog = useCatalog();
   return (
     <section className="section catalog-section" id="catalog">
@@ -290,7 +299,7 @@ function CatalogRows() {
             </p>
           </div>
           <span className="mono dim" style={{ fontSize: 10 }}>
-            07 LAYERS / DEMO CATALOG
+            07 LAYERS / {mode === 'fixture' ? 'DEMO CATALOG' : 'CATALOG'}
           </span>
         </div>
         <div className="catalog-rows">
@@ -307,7 +316,7 @@ function CatalogRows() {
                   <p>{layer.catalog}</p>
                 </div>
                 <div className="catalog-metric">
-                  DEMO CATALOG
+                  {mode === 'fixture' ? 'DEMO CATALOG' : 'CATALOG'}
                   <strong>
                     {count} item{count === 1 ? '' : 's'}
                   </strong>
@@ -425,6 +434,7 @@ function Confidence() {
 }
 
 function Steps() {
+  const { mode } = useData();
   return (
     <section className="section steps-section" id="how-it-works">
       <div className="container">
@@ -438,8 +448,9 @@ function Steps() {
             </span>
             <h3>Pick a starting point</h3>
             <p>
-              Start fresh or load a reference stack for a support assistant, document search, agent
-              workflow, or self-hosted model.
+              {mode === 'fixture'
+                ? 'Start fresh or load a reference stack for a support assistant, document search, agent workflow, or self-hosted model.'
+                : 'Start a blank build and choose components from the active catalog.'}
             </p>
           </div>
           <div className="how-item">
@@ -460,8 +471,8 @@ function Steps() {
             </span>
             <h3>Leave with a real plan</h3>
             <p>
-              Export your component choices as contract-shaped JSON or share a link to the exact
-              demonstration build you configured.
+              Export your component choices as JSON or share a link to the exact build you
+              configured.
             </p>
           </div>
         </div>

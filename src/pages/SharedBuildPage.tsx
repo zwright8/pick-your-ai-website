@@ -3,17 +3,18 @@
  * never send to the server, or comes from a local export file. Previewing never touches the
  * viewer's drafts; only "Import to my builds" creates a new local build.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import type { BuildSnapshot } from '../contracts';
 import { KIND_LABELS, TIERS, TIER_LABELS, kindsInTier } from '../contracts';
 import { buildStaleness } from '../domain/freshness';
-import { useValidatorsReady } from '../app/validators';
-import { decodeShareFragment, importBuild, type ImportResult } from '../domain/share';
+import { useValidatorsStatus } from '../app/validators';
+import { decodeShareFragment, importBuildFile, type ImportResult } from '../domain/share';
 import { useBuilder } from '../app/builder-context';
 import { useData } from '../app/data-context';
 import { useBuildAnalysis, useCatalog, useRuleset } from '../app/queries';
 import { itemPath } from '../lib/catalog-view';
+import { formatRecordedDate } from '../lib/date-format';
 import { humanize } from '../lib/schema-fields';
 import { EmptyState, ErrorState, Loading, Notice } from '../components/feedback';
 import { Icon } from '../components/icon';
@@ -27,10 +28,18 @@ const PREVIEW_NOTE = 'Shared builds are previews; there is no server-side sharin
 export default function SharedBuildPage() {
   const location = useLocation();
   const { mode } = useData();
-  const validatorsLoaded = useValidatorsReady();
+  const validatorStatus = useValidatorsStatus();
+  const validatorsLoaded = validatorStatus === 'ready';
   const [file, setFile] = useState<{ name: string; result: ImportResult } | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileRequest = useRef(0);
+  useEffect(
+    () => () => {
+      fileRequest.current++;
+    },
+    [],
+  );
 
   const fromLink = useMemo(
     () => (location.hash && validatorsLoaded ? decodeShareFragment(location.hash, mode) : null),
@@ -41,7 +50,9 @@ export default function SharedBuildPage() {
 
   const onFile = async (f: File | undefined) => {
     if (!f) return;
-    const result = importBuild(await f.text(), mode);
+    const request = ++fileRequest.current;
+    const result = await importBuildFile(f, mode);
+    if (request !== fileRequest.current) return;
     if (result.ok) {
       setFileError(null);
       setFile({ name: f.name, result });
@@ -78,7 +89,21 @@ export default function SharedBuildPage() {
     return (
       <div className="app-page">
         <div className="container">
-          <Loading label="Opening shared build…" />
+          {validatorStatus === 'failed' ? (
+            <div role="alert" className="notice-error">
+              <h1>Shared build unavailable</h1>
+              <p>Could not load build validation. Reload the page and try again.</p>
+              <button
+                type="button"
+                className="btn btn-outline btn-small"
+                onClick={() => window.location.reload()}
+              >
+                Reload page
+              </button>
+            </div>
+          ) : (
+            <Loading label="Opening shared build…" />
+          )}
         </div>
       </div>
     );
@@ -109,7 +134,11 @@ export default function SharedBuildPage() {
             <button
               type="button"
               className="btn btn-outline btn-small"
-              onClick={() => setFile(null)}
+              onClick={() => {
+                fileRequest.current++;
+                setFile(null);
+                setFileError(null);
+              }}
             >
               Close file preview
             </button>
@@ -171,7 +200,7 @@ function SharedPreview({
 
   const byId = catalog.byId;
   const staleness = buildStaleness(build, catalog.data);
-  const unresolved = build.selections.filter((s) => !byId.has(s.catalog_item_id)).length;
+  const unresolved = staleness.missingSelectionIds.length;
   const headline = costHeadline(analysis.costIsCurrent ? analysis.cost : undefined);
   const report = analysis.reportIsCurrent ? analysis.report : undefined;
   const incomplete = incompleteBuild(build, report, ruleset.data);
@@ -185,7 +214,7 @@ function SharedPreview({
           type="button"
           className="btn btn-primary"
           onClick={() => {
-            startNew(build, build.name);
+            if (startNew(build, build.name) === false) return;
             void navigate('/builder');
           }}
         >
@@ -278,7 +307,9 @@ function SharedPreview({
           <dd>{build.revision}</dd>
           <dt>Last updated</dt>
           <dd>
-            <time dateTime={build.updated_at}>{new Date(build.updated_at).toLocaleString()}</time>
+            <time dateTime={build.updated_at}>
+              {formatRecordedDate(build.updated_at, 'date-time')}
+            </time>
           </dd>
           <dt>Lifecycle</dt>
           <dd>{humanize(build.lifecycle)}</dd>
@@ -303,16 +334,25 @@ function SharedPreview({
               </h3>
               <ul className="summary-list">
                 {rows.map((s) => {
-                  const item = byId.get(s.catalog_item_id);
+                  const candidate = byId.get(s.catalog_item_id);
+                  const item = candidate?.kind === s.kind ? candidate : undefined;
+                  const drifted = Boolean(item && item.version !== s.catalog_item_version);
                   return (
                     <li key={s.id}>
                       <strong>{KIND_LABELS[s.kind]}:</strong>{' '}
                       {item ? (
                         <>
+                          {drifted ? <span className="dim">Current catalog name: </span> : null}
                           <Link className="text-link" to={itemPath(item)}>
                             {item.name}
                           </Link>
-                          {(item.tags ?? []).includes('synthetic') ? <SyntheticBadge /> : null}
+                          {(item.tags ?? []).includes('synthetic') ? (
+                            drifted ? (
+                              <span className="dim"> (Current catalog record is synthetic)</span>
+                            ) : (
+                              <SyntheticBadge />
+                            )
+                          ) : null}
                         </>
                       ) : (
                         <>
@@ -320,6 +360,12 @@ function SharedPreview({
                           <span className="badge badge-unknown">Not in this catalog</span>
                         </>
                       )}{' '}
+                      {item && item.version !== s.catalog_item_version ? (
+                        <span className="dim">
+                          Selected version: {s.catalog_item_version} · current catalog version:{' '}
+                          {item.version}.{' '}
+                        </span>
+                      ) : null}
                       {s.role !== 'primary' ? <span className="dim">({s.role})</span> : null}{' '}
                       {!s.enabled ? <span className="dim">(disabled)</span> : null}
                     </li>

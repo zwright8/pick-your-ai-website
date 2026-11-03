@@ -24,3 +24,9 @@ export function compareDateTimes(left: string, right: string): number {
   const bFraction = b.fraction.padEnd(precision, '0');
   return aFraction < bFraction ? -1 : aFraction > bFraction ? 1 : 0;
 }
+
+/** Sort newest first, keeping missing dates after recorded contract timestamps. */
+export function compareNewestRecordedDates(left: string, right: string): number {
+  if (!left || !right) return left ? -1 : right ? 1 : 0;
+  return compareDateTimes(right, left);
+}

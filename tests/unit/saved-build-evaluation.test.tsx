@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBuilder } from '../../src/app/builder-context';
 import { DataContext } from '../../src/app/data-context';
 import { ToastProvider } from '../../src/components/feedback';
@@ -12,6 +12,8 @@ import MyBuildsPage from '../../src/pages/MyBuildsPage';
 import { NOW, apiChat, buildWith, contradictory, selfHosted } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
+
+beforeEach(() => localStorage.clear());
 
 async function showBuild(build: BuildSnapshot, current = false) {
   vi.mocked(useBuilder).mockReturnValue({
@@ -48,6 +50,175 @@ async function showBuild(build: BuildSnapshot, current = false) {
 }
 
 describe('saved-build evaluation', () => {
+  it.each(['loading', 'failure'])(
+    'keeps the price visible when compatibility is %s',
+    async (state) => {
+      vi.mocked(useBuilder).mockReturnValue({
+        draft: null,
+        ready: true,
+        catalogById: new Map(),
+        lastChange: null,
+        saveState: { status: 'saved' },
+        apply: vi.fn(),
+        startNew: vi.fn(),
+        open: vi.fn(),
+        restore: vi.fn(),
+      });
+      const providers = createFixtureProviders({ now: () => NOW });
+      const build = apiChat();
+      await providers.builds.save(createDraft(build), null);
+      if (state === 'loading')
+        vi.spyOn(providers.compatibility, 'evaluate').mockImplementation(
+          () => new Promise(() => {}),
+        );
+      else
+        vi.spyOn(providers.compatibility, 'evaluate').mockRejectedValue(
+          new Error('evaluation unavailable'),
+        );
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+      const view = render(
+        <QueryClientProvider client={client}>
+          <DataContext.Provider value={providers}>
+            <MemoryRouter>
+              <MyBuildsPage />
+            </MemoryRouter>
+          </DataContext.Provider>
+        </QueryClientProvider>,
+      );
+      const card = await screen.findByRole('article');
+      await waitFor(() => expect(card).toHaveTextContent('$324.00'));
+      expect(card).toHaveTextContent('2 of 7 layers configured');
+      expect(card).toHaveTextContent('Not checked');
+      view.unmount();
+      client.clear();
+    },
+  );
+
+  it('renders each saved build as its own analysis finishes', async () => {
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: null,
+      ready: true,
+      catalogById: new Map(),
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const providers = createFixtureProviders({ now: () => NOW });
+    const base = apiChat();
+    const slow = { ...base, id: 'build.slow', name: 'Slow build' };
+    const fast = { ...base, id: 'build.fast', name: 'Fast build' };
+    await providers.builds.save(createDraft(slow), null);
+    await providers.builds.save(createDraft(fast), null);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const estimate = providers.pricing.estimate.bind(providers.pricing);
+    vi.spyOn(providers.pricing, 'estimate').mockImplementation(async (build) => {
+      if (build.id === slow.id) await gate;
+      return estimate(build);
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <MyBuildsPage />
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    const fastCard = (await screen.findByRole('heading', { name: 'Fast build' })).closest(
+      'article',
+    );
+    const slowCard = (await screen.findByRole('heading', { name: 'Slow build' })).closest(
+      'article',
+    );
+    expect(fastCard).not.toBeNull();
+    expect(slowCard).not.toBeNull();
+    await waitFor(() => expect(fastCard).toHaveTextContent('No conflicts'));
+    expect(slowCard).toHaveTextContent('Not checked');
+    release();
+    await waitFor(() => expect(slowCard).toHaveTextContent('No conflicts'));
+    view.unmount();
+    client.clear();
+  });
+
+  it('does not display newer analysis under an older library revision', async () => {
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: null,
+      ready: true,
+      catalogById: new Map(),
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const providers = createFixtureProviders({ now: () => NOW });
+    const build = apiChat();
+    await providers.builds.save(createDraft(build), null);
+    vi.spyOn(providers.builds, 'get').mockResolvedValue(
+      createDraft({ ...build, revision: build.revision + 1 }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <MyBuildsPage />
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByRole('article');
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(card).toHaveTextContent('Not checked');
+    expect(card).not.toHaveTextContent('of 7 layers configured');
+    view.unmount();
+    client.clear();
+  });
+
+  it('keeps the price but withholds an evaluation for a different revision', async () => {
+    vi.mocked(useBuilder).mockReturnValue({
+      draft: null,
+      ready: true,
+      catalogById: new Map(),
+      lastChange: null,
+      saveState: { status: 'saved' },
+      apply: vi.fn(),
+      startNew: vi.fn(),
+      open: vi.fn(),
+      restore: vi.fn(),
+    });
+    const providers = createFixtureProviders({ now: () => NOW });
+    const build = apiChat();
+    await providers.builds.save(createDraft(build), null);
+    const report = await providers.compatibility.evaluate(build);
+    vi.spyOn(providers.compatibility, 'evaluate').mockResolvedValue({
+      ...report,
+      build_revision: build.revision + 1,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <MyBuildsPage />
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    const card = await screen.findByRole('article');
+    await waitFor(() => expect(card).toHaveTextContent('$324.00'));
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(card).toHaveTextContent('Not checked');
+    view.unmount();
+    client.clear();
+  });
+
   it('passes pricing evidence to evaluation and exposes a hard-cap violation', async () => {
     const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
       monthly_budget_amount: '1.00',
@@ -112,14 +283,12 @@ it.each(['loading', 'pricing failure', 'evaluation failure'])(
     });
     const providers = createFixtureProviders({ now: () => NOW });
     await providers.builds.save(createDraft(build), null);
+    const evaluate = vi.spyOn(providers.compatibility, 'evaluate');
     if (state === 'loading')
       vi.spyOn(providers.pricing, 'estimate').mockImplementation(() => new Promise(() => {}));
     else if (state === 'pricing failure')
       vi.spyOn(providers.pricing, 'estimate').mockRejectedValue(new Error('pricing unavailable'));
-    else
-      vi.spyOn(providers.compatibility, 'evaluate').mockRejectedValue(
-        new Error('evaluation unavailable'),
-      );
+    else evaluate.mockRejectedValue(new Error('evaluation unavailable'));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     const view = render(
       <QueryClientProvider client={client}>
@@ -132,8 +301,12 @@ it.each(['loading', 'pricing failure', 'evaluation failure'])(
     );
     const card = await screen.findByRole('article');
     if (state !== 'loading') await waitFor(() => expect(client.isFetching()).toBe(0));
-    expect(card).toHaveTextContent(`${build.selections.length} selections`);
-    expect(card).not.toHaveTextContent('of 7 layers configured');
+    await waitFor(() => expect(card).toHaveTextContent('of 7 layers configured'));
+    if (state !== 'evaluation failure') {
+      expect(card).not.toHaveTextContent('$0.00');
+    }
+    if (state === 'pricing failure')
+      await waitFor(() => expect(evaluate).toHaveBeenCalledWith(build, { costEstimate: null }));
     view.unmount();
     client.clear();
   },

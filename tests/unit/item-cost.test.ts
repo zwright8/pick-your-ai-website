@@ -13,7 +13,7 @@ import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import { demoItemId } from '../../src/data/fixture/catalog';
 import { estimateCost } from '../../src/domain/cost';
 import { addOrReplace } from '../../src/domain/build';
-import { itemPrice } from '../../src/lib/item-cost';
+import { compareItemPrices, itemPrice, type ItemPrice } from '../../src/lib/item-cost';
 import { apiChat, buildWith, BY_ID, CATALOG, item, NOW } from './scenarios';
 
 const PRICEBOOK: Pricebook = DEMO_PRICEBOOK;
@@ -21,7 +21,49 @@ const PRICEBOOK: Pricebook = DEMO_PRICEBOOK;
 /** apiChat projects 2000 requests/day × 600 in / 300 out tokens over the period. */
 const build = apiChat();
 
+describe('catalog price ordering', () => {
+  const price = (amount: string | null, partial = false): ItemPrice => ({
+    amount,
+    currency: 'USD',
+    label: '',
+    note: '',
+    partial,
+    included: false,
+  });
+
+  it.each(['asc', 'desc'] as const)(
+    'keeps lower bounds and unknowns after complete prices in %s order',
+    (dir) => {
+      expect(compareItemPrices(price('999'), price('1', true), dir)).toBeLessThan(0);
+      expect(compareItemPrices(price('1', true), price(null), dir)).toBeLessThan(0);
+    },
+  );
+
+  it('compares large decimal amounts without losing a unit to floating point', () => {
+    const a = price('9007199254740992');
+    const b = price('9007199254740993');
+    expect(compareItemPrices(a, b, 'asc')).toBeLessThan(0);
+    expect(compareItemPrices(a, b, 'desc')).toBeGreaterThan(0);
+  });
+});
+
 describe('itemPrice pricebook lock', () => {
+  it('prices a candidate at its own version while leaving a stale selected version unknown', () => {
+    const model = item('model', 'aurora-large');
+    const stale = {
+      ...build,
+      selections: build.selections.map((selection) =>
+        selection.kind === 'model'
+          ? { ...selection, catalog_item_version: 'older-version' }
+          : selection,
+      ),
+    };
+    const selected = stale.selections.find((selection) => selection.kind === 'model');
+    if (!selected) throw new Error('Missing model selection');
+    expect(itemPrice(model, stale, BY_ID, PRICEBOOK).amount).toBe('324.00');
+    expect(itemPrice(model, stale, BY_ID, PRICEBOOK, selected).amount).toBeNull();
+  });
+
   it('rejects default rates when the build locks another pricebook', () => {
     const locked = { ...build, locks: { ...build.locks, pricebook_id: 'pricebook.unavailable' } };
     const price = itemPrice(item('model', 'aurora-large'), locked, BY_ID, PRICEBOOK);

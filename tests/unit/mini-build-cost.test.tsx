@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
-import { MiniBuild } from '../../src/components/parts';
+import { MiniBuild, Money } from '../../src/components/parts';
 import type { CostEstimate } from '../../src/contracts';
 import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import { estimateCost } from '../../src/domain/cost';
@@ -11,6 +11,7 @@ function show(cost: CostEstimate, selected = 5) {
   render(
     <MemoryRouter>
       <MiniBuild
+        dataMode="fixture"
         selected={selected}
         required={{ done: 5, total: 5 }}
         outcome="none"
@@ -24,6 +25,11 @@ function show(cost: CostEstimate, selected = 5) {
 }
 
 describe('catalog total', () => {
+  it('renders a large row price without losing decimal digits', () => {
+    render(<Money amount="9007199254740993.12" currency="USD" />);
+    expect(screen.getByText('$9,007,199,254,740,993.12')).toBeVisible();
+  });
+
   it('shows Unknown when the selected currency has no rates', () => {
     const build = apiChat();
     build.objectives.currency = 'EUR';

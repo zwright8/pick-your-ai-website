@@ -22,6 +22,20 @@ html.light {
   color-scheme: light;
 }
 
+/* Saved-card actions use dark or accent fills in both themes. */
+html.light .saved-card-actions button {
+  color: #fff;
+}
+
+/* Keep user-provided build names inside the available card width. */
+.working-content {
+  min-width: 0;
+}
+.working-content h3,
+.saved-card h3 {
+  overflow-wrap: anywhere;
+}
+
 /* ---------- accessibility helpers ---------- */
 .sr-only {
   position: absolute;
@@ -106,6 +120,31 @@ h1[tabindex='-1']:focus-visible {
 .notice-error strong {
   color: #ffada6;
 }
+:root {
+  --notice-text-size: 1rem;
+  --notice-gap: 1rem;
+  --notice-content-gap: 0.625rem;
+  --notice-control-height: 2.5rem;
+}
+.export-warning {
+  margin: var(--notice-gap) 0;
+}
+.export-warning p,
+.saved-card .export-warning p,
+html.light .saved-card .export-warning p {
+  margin: 0 0 var(--notice-content-gap);
+  color: inherit;
+  font-size: var(--notice-text-size);
+  overflow-wrap: anywhere;
+}
+.export-warning .btn {
+  min-height: var(--notice-control-height);
+  font-size: var(--notice-text-size);
+}
+.json-preview-warning {
+  font-size: var(--notice-text-size);
+  overflow-wrap: anywhere;
+}
 html.light .notice-error {
   border-color: #e0a7a3;
   background: #fdeceb;
@@ -148,6 +187,12 @@ html.light .control-input {
   background: #fff;
   border-color: #b9cfca;
   color: var(--text);
+}
+/* The modal remains dark in light mode and needs its own control palette. */
+html.light .modal .control-input {
+  background: #0f1a24;
+  border-color: #344954;
+  color: #eaf2f3;
 }
 
 .check-row {
@@ -367,6 +412,22 @@ html.light .builder-extras {
   line-height: 1.55;
   color: var(--dim);
 }
+.saved-cost-sort-note {
+  margin-bottom: 15px;
+}
+.saved-index-recovery {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.saved-index-recovery summary {
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 600;
+}
+.saved-index-recovery > div {
+  margin-top: 12px;
+}
 .field-error {
   margin: 5px 0 0;
   font-size: 11px;
@@ -375,6 +436,9 @@ html.light .builder-extras {
 }
 html.light .field-error {
   color: #922f2a;
+}
+html.light .modal .field-error {
+  color: #fb817c;
 }
 
 /* ---------- generic content panel + data table (match the mock's card/table treatment) ---------- */

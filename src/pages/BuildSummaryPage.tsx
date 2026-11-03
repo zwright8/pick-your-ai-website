@@ -7,25 +7,33 @@ import type { ComponentKind } from '../contracts';
  * Styling follows the design mock's secondary pages (`.page-masthead` + `.panel` blocks).
  */
 import { Link } from 'react-router';
+import { useRef, useState } from 'react';
 import type { BuildSnapshot, CatalogItem, CostEstimate, Money } from '../contracts';
 import { KIND_LABELS, TIERS, TIER_LABELS, kindsInTier } from '../contracts';
 import { buildStaleness } from '../domain/freshness';
 import { useValidatorsReady } from '../app/validators';
-import { canExport, exportBuild, exportFileName } from '../domain/share';
+import {
+  canExport,
+  exportBuildJson,
+  exportFileImportProblem,
+  exportFileName,
+} from '../domain/share';
 import { useBuilder } from '../app/builder-context';
 import { useData } from '../app/data-context';
 import { useBuildAnalysis, useCatalog, useRuleset } from '../app/queries';
 import { itemPath } from '../lib/catalog-view';
 import { formatValue, humanize, settingsFields } from '../lib/schema-fields';
+import { formatRecordedDate } from '../lib/date-format';
 import { EmptyState, ErrorState, Loading, Notice } from '../components/feedback';
 import { Icon } from '../components/icon';
 import { PageHeader } from '../components/layout';
 import { OutcomeBadge, SyntheticBadge } from '../components/status';
 import { buildMarkdown, download } from '../features/builder/BuildToolbar';
+import { ExportWarning, type ExportWarningData } from '../features/builds/ExportWarning';
 import { incompleteBuild } from '../features/builder/incomplete';
 import { costHeadline, flaggedFindings, formatMoney, overall } from '../features/builder/analysis';
 
-const formatDate = (iso: string) => new Date(iso).toLocaleString();
+const formatDate = (iso: string) => formatRecordedDate(iso, 'date-time');
 
 function selectionLabel(
   build: BuildSnapshot,
@@ -34,11 +42,18 @@ function selectionLabel(
 ) {
   const s = build.selections.find((x) => x.id === selectionId);
   if (!s) return selectionId;
-  const item = byId.get(s.catalog_item_id);
-  return `${KIND_LABELS[s.kind]}: ${item?.name ?? s.catalog_item_id}${s.enabled ? '' : ' (disabled)'}`;
+  const candidate = byId.get(s.catalog_item_id);
+  const item = candidate?.kind === s.kind ? candidate : undefined;
+  const label =
+    item && item.version !== s.catalog_item_version
+      ? `${item.name} (current catalog name; selected version: ${s.catalog_item_version}; current catalog version: ${item.version})`
+      : (item?.name ?? s.catalog_item_id);
+  return `${KIND_LABELS[s.kind]}: ${label}${s.enabled ? '' : ' (disabled)'}`;
 }
 
 export default function BuildSummaryPage() {
+  const [exportWarning, setExportWarning] = useState<ExportWarningData | null>(null);
+  const exportRef = useRef<HTMLButtonElement>(null);
   useValidatorsReady(); // re-render once export validation is possible
   const { draft, ready } = useBuilder();
   const { mode } = useData();
@@ -100,16 +115,18 @@ export default function BuildSummaryPage() {
             Print
           </button>
           <button
+            ref={exportRef}
             type="button"
             className="btn btn-outline btn-small"
             disabled={Boolean(exportProblem)}
             aria-describedby={exportProblem ? 'export-problem' : undefined}
-            onClick={() =>
-              download(
-                exportFileName(build),
-                JSON.stringify(exportBuild(build, mode), null, 2) + '\n',
-              )
-            }
+            onClick={() => {
+              const filename = exportFileName(build);
+              const json = exportBuildJson(build, mode);
+              download(filename, json);
+              const problem = exportFileImportProblem(json);
+              if (problem) setExportWarning({ filename, problem });
+            }}
           >
             <Icon name="download" /> Export JSON
           </button>
@@ -120,7 +137,7 @@ export default function BuildSummaryPage() {
             onClick={() =>
               download(
                 exportFileName(build).replace(/\.json$/, '.md'),
-                buildMarkdown(build, byId),
+                buildMarkdown(build, byId, mode),
                 'text/markdown',
               )
             }
@@ -128,6 +145,17 @@ export default function BuildSummaryPage() {
             <Icon name="download" /> Export Markdown
           </button>
         </div>
+        {exportWarning ? (
+          <div className="no-print">
+            <ExportWarning
+              warning={exportWarning}
+              onDismiss={() => {
+                setExportWarning(null);
+                requestAnimationFrame(() => exportRef.current?.focus());
+              }}
+            />
+          </div>
+        ) : null}
         {exportProblem ? (
           <p id="export-problem" className="hint-text no-print">
             JSON export unavailable: {exportProblem}
@@ -369,7 +397,7 @@ export default function BuildSummaryPage() {
               onRetry={() => void analysis.costQuery.refetch()}
             />
           ) : analysis.costIsCurrent && analysis.cost ? (
-            <CostBreakdown cost={analysis.cost} build={build} byId={byId} />
+            <CostBreakdown cost={analysis.cost} build={build} byId={byId} mode={mode} />
           ) : (
             <Loading label={`Estimating cost for revision ${build.revision}…`} />
           )}
@@ -541,17 +569,29 @@ function SelectionsSection({
                     </th>
                   </tr>
                   {rows.map((s) => {
-                    const item = byId.get(s.catalog_item_id);
+                    const candidate = byId.get(s.catalog_item_id);
+                    const item = candidate?.kind === s.kind ? candidate : undefined;
+                    const drifted = Boolean(item && item.version !== s.catalog_item_version);
                     return (
                       <tr key={s.id}>
                         <th scope="row">{KIND_LABELS[s.kind]}</th>
                         <td>
                           {item ? (
                             <span>
+                              {drifted ? <span className="dim">Current catalog name: </span> : null}
                               <Link className="text-link" to={itemPath(item)}>
                                 {item.name}
                               </Link>
-                              {(item.tags ?? []).includes('synthetic') ? <SyntheticBadge /> : null}
+                              {(item.tags ?? []).includes('synthetic') ? (
+                                drifted ? (
+                                  <span className="dim">
+                                    {' '}
+                                    (Current catalog record is synthetic)
+                                  </span>
+                                ) : (
+                                  <SyntheticBadge />
+                                )
+                              ) : null}
                             </span>
                           ) : (
                             <span>
@@ -561,7 +601,13 @@ function SelectionsSection({
                               </strong>
                             </span>
                           )}
-                          <span className="dim">v{s.catalog_item_version}</span>
+                          <span className="dim">
+                            {' '}
+                            Selected version: {s.catalog_item_version}
+                            {item && item.version !== s.catalog_item_version
+                              ? ` · current catalog version: ${item.version}`
+                              : ''}
+                          </span>
                         </td>
                         <td>{s.role}</td>
                         <td>{s.enabled ? 'Yes' : 'No (disabled)'}</td>
@@ -583,10 +629,12 @@ function CostBreakdown({
   cost,
   build,
   byId,
+  mode,
 }: {
   cost: CostEstimate;
   build: BuildSnapshot;
   byId: ReadonlyMap<string, CatalogItem>;
+  mode: 'fixture' | 'http';
 }) {
   const headline = costHeadline(cost);
   const money = (m: Money) => formatMoney(m.amount, m.currency);
@@ -608,7 +656,11 @@ function CostBreakdown({
       {cost.line_items.length ? (
         <div className="table-scroll" tabIndex={0} role="region" aria-label="Scrollable table">
           <table className="data-table">
-            <caption>Synthetic demo prices — not a quote</caption>
+            <caption>
+              {mode === 'fixture'
+                ? 'Synthetic demo prices — not a quote'
+                : 'Estimated prices — not a quote'}
+            </caption>
             <thead>
               <tr>
                 <th scope="col">Selection</th>

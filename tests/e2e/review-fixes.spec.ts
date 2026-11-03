@@ -7,6 +7,7 @@
  * comparison that refilled itself, and a starter estimate that presented a lower bound as a total.
  */
 import { expect, test } from '@playwright/test';
+import { waitForSavedName, waitForSavedRevision } from './helpers/saved-build';
 
 const desktopOnly = (name: string) => name.startsWith('mobile');
 
@@ -26,6 +27,24 @@ test('builder: objectives mount on first expansion and preserve unsaved edits', 
   await expect(field).toHaveValue('1234');
 });
 
+test('builder: editing another field does not erase unapplied objectives', async ({ page }) => {
+  await page.goto('/builder');
+  await page.locator('summary').filter({ hasText: 'Objectives and policy' }).click();
+  const requests = page.getByRole('textbox', { name: 'Requests per day' });
+  await requests.fill('1234');
+  const name = page.getByRole('textbox', { name: 'Build name' });
+  await name.fill('Renamed while editing');
+  await name.press('Tab');
+  await expect(page.locator('.pbar')).toContainText('rev 2');
+  await expect(requests).toHaveValue('1234');
+  await page.getByRole('button', { name: 'Apply objectives' }).click();
+  await expect(page.locator('.pbar')).toContainText('rev 3');
+  await waitForSavedRevision(page, 3);
+  await page.reload();
+  await page.locator('summary').filter({ hasText: 'Objectives and policy' }).click();
+  await expect(page.getByRole('textbox', { name: 'Requests per day' })).toHaveValue('1234');
+});
+
 test('builder: restoring retained history creates a new revision and survives reload', async ({
   page,
 }, info) => {
@@ -37,6 +56,7 @@ test('builder: restoring retained history creates a new revision and survives re
     .click();
   await page.getByRole('link', { name: /Back to builder/ }).click();
   await expect(page.locator('.pbar')).toContainText('rev 2');
+  await waitForSavedRevision(page, 2);
   await page.goto('/catalog/tool?show=all');
   await page
     .getByRole('row', { name: /Demo Ticket Writer/ })
@@ -79,10 +99,12 @@ test('catalog: add another permits the same product and keeps both selections', 
     .getByRole('row', { name: /Demo Web Search Tool/ })
     .getByRole('button', { name: 'Add' })
     .click();
+  await waitForSavedRevision(page, 2);
   await page.goto('/catalog/tool?show=all&add=1');
   const row = page.getByRole('row', { name: /Demo Web Search Tool/ });
   await expect(row.getByRole('button', { name: /Add|In stack/ })).toBeEnabled();
   await row.getByRole('button', { name: /Add|In stack/ }).click();
+  await waitForSavedRevision(page, 3);
   await page.goto('/builder');
   await expect(page.locator('.pt tbody tr[data-kind="tool"]')).toHaveCount(2);
   await expect(page.locator('.pt tbody tr[data-kind="tool"]')).toContainText([
@@ -115,6 +137,7 @@ test('builder: a many-kind selection offers an add-another path that appends', a
     .getByRole('button', { name: 'Add' })
     .click();
 
+  await waitForSavedRevision(page, 2);
   await page.goto('/builder');
   await expect(page.locator('.pt tbody tr[data-kind="tool"]')).toHaveCount(1);
   await page.getByRole('link', { name: /Add another tool/i }).click();
@@ -131,6 +154,7 @@ test('builder: a many-kind selection offers an add-another path that appends', a
     .click();
 
   // The first tool is preserved; the second is added beside it.
+  await waitForSavedRevision(page, 3);
   await page.goto('/builder');
   const tools = page.locator('.pt tbody tr[data-kind="tool"]');
   await expect(tools).toHaveCount(2);
@@ -147,8 +171,10 @@ test('builder: a disabled selection stays visible with enable and remove control
     .getByRole('row', { name: /Demo Customer Support Chat/ })
     .getByRole('button', { name: 'Add' })
     .click();
+  await waitForSavedRevision(page, 2);
   await page.goto('/catalog/model?show=all');
   await page.getByRole('button', { name: 'Add' }).first().click();
+  await waitForSavedRevision(page, 3);
   await page.goto('/builder');
 
   const row = page.locator('.pt tbody tr[data-kind="model"]').first();
@@ -178,6 +204,7 @@ test('compare: keeps the lower-bound marker and cross-layer selections', async (
     .locator('.template-showcase', { hasText: 'Provider-API support chat' })
     .getByRole('button', { name: /Use this build/ })
     .click();
+  await waitForSavedName(page, 'Provider-API support chat (demo)');
   await page.goto('/compare?ids=demo~model~aurora-mini,demo~accelerator~c24');
 
   const table = page.locator('table.pcmp');
@@ -206,6 +233,7 @@ test('my builds: a saved build with an unpriced component shows a lower bound', 
     .getByRole('button', { name: /Use this build/ })
     .click();
 
+  await waitForSavedName(page, 'Document Q&A with retrieval (demo)');
   await page.goto('/builds');
   const card = page.locator('.saved-card', { hasText: 'Document Q&A' });
   // The saved card used to store only the amount, so a partial total read as complete.
@@ -239,6 +267,7 @@ test('selected model keeps its settings when revisited in compare and detail', a
     stored.build.selections.find(
       (s: { catalog_item_id: string }) => s.catalog_item_id === 'demo.model.aurora-large',
     ).settings.temperature = 0.37;
+    stored.revisions[stored.revisions.length - 1] = structuredClone(stored.build);
     localStorage.setItem(key, JSON.stringify(stored));
     return stored.build;
   });
@@ -274,6 +303,7 @@ test('catalog preserves a disabled model and its configured settings', async ({ 
     );
     model.settings.temperature = 0.37;
     model.enabled = false;
+    stored.revisions[stored.revisions.length - 1] = structuredClone(stored.build);
     localStorage.setItem(key, JSON.stringify(stored));
     return stored.build;
   });
@@ -293,6 +323,7 @@ test('summary revision comparison opens the build chooser', async ({ page }) => 
   await page.goto('/catalog/model/demo~model~aurora-large');
   await page.getByRole('button', { name: /Add to my stack/ }).click();
   await expect(page.getByRole('button', { name: /In your build/ })).toBeDisabled();
+  await waitForSavedRevision(page, 2);
   await page.goto('/summary');
   await page.getByRole('link', { name: 'Compare two revisions' }).click();
   await expect(page).toHaveURL(/\/compare\?mode=builds$/);

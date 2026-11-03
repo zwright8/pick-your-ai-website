@@ -35,6 +35,41 @@ function setup(page = <HomePage />, mode: 'fixture' | 'http' = 'fixture') {
 }
 
 describe('home preview evidence', () => {
+  it('does not price an older selected version using the current catalog version', async () => {
+    const { providers, mount } = setup();
+    const modelId = 'demo.model.aurora-large';
+    const getSnapshot = providers.catalog.getSnapshot.bind(providers.catalog);
+    vi.spyOn(providers.catalog, 'getSnapshot').mockImplementation(async (...args) => {
+      const snapshot = await getSnapshot(...args);
+      return {
+        ...snapshot,
+        items: snapshot.items.map((entry) =>
+          entry.id === modelId ? { ...entry, version: 'newer-version' } : entry,
+        ),
+      };
+    });
+    const getPricebook = providers.pricing.getPricebook.bind(providers.pricing);
+    vi.spyOn(providers.pricing, 'getPricebook').mockImplementation(async (...args) => {
+      const pricebook = await getPricebook(...args);
+      return {
+        ...pricebook,
+        rates: pricebook.rates.map((rate) =>
+          rate.catalog_item_id === modelId
+            ? { ...rate, catalog_item_version: 'newer-version' }
+            : rate,
+        ),
+      };
+    });
+    mount();
+    const preview = screen.getByRole('group', { name: 'Example demo AI stack' });
+    await waitFor(() =>
+      expect(preview.querySelector('.preview-stamp')).toHaveTextContent('unknown finding'),
+    );
+    const model = within(preview).getByText('Demo Aurora Large').closest('.preview-row');
+    expect(model?.querySelector('.preview-price')).toHaveTextContent('Unknown');
+    expect(model).toHaveTextContent('Selected version demo-2026.10; catalog version newer-version');
+  });
+
   it.each(['unknown', 'partial', 'complete'] as const)(
     'preserves %s price coverage',
     async (coverage) => {

@@ -15,7 +15,7 @@ Vite 8 · React 19 · TypeScript 6 (strict, `noUncheckedIndexedAccess`) · plain
 | Layer             | Path                                                     | Responsibility                                                                                                                                                                        |
 | ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Presentation      | `src/pages`, `src/features/*`, `src/components`          | Pages, builder UI, catalog UI, primitives (`status.tsx`, `feedback.tsx`, `layout.tsx`, `icon.tsx`) and the view helpers `lib/layers.ts`, `lib/item-cost.ts`, `lib/compat.ts`          |
-| Application       | `src/app`                                                | Routing, `BuilderProvider` (current draft, commit, persistence, invalidation), TanStack Query hooks keyed by build id and revision                                                    |
+| Application       | `src/app`                                                | Routing, `BuilderProvider` (current draft, commit, persistence, invalidation), TanStack Query hooks keyed by build id, revision and snapshot content                                  |
 | Domain / contract | `src/contracts`, `src/domain`                            | Generated types and validators, registry, baseline graph and ruleset, evaluator (port of `reference/evaluate.py`), activation, invalidation, build operations, cost, freshness, share |
 | Data access       | `src/data`                                               | Provider interfaces (`types.ts`), HTTP client and providers, local build repository, configuration (`config.ts`), `DataError`                                                         |
 | Fixtures          | `src/data/fixture`                                       | Synthetic catalog, pricebook, starter stacks, fixture providers                                                                                                                       |
@@ -35,14 +35,14 @@ user action (Add / Replace / Configure / Remove / Objectives)
       BuildRepository.save(draft, expectedRevision)  (compare-and-swap; 409 on stale writer)
   → React re-render with the new revision
       useBuildAnalysis(build):
-        ['cost', id, rev]       PricingProvider.estimate
-        ['resources', id, rev]  ResourceEstimateProvider.estimate
-        ['evaluation', id, rev, costId, resourceId] CompatibilityEvaluator.evaluate(build, {cost, resources})
+        ['cost', id, rev, build]       PricingProvider.estimate
+        ['resources', id, rev, build]  ResourceEstimateProvider.estimate
+        ['evaluation', id, rev, build, cost, resources] CompatibilityEvaluator.evaluate(build, {cost, resources})
       prior-evaluation metadata is labelled stale; findings, verdicts, counts and readiness await the current report
   → current-report aria-live announcement: "Revision N evaluated: X failing, Y unknown"
 ```
 
-Build-derived results are keyed by `(build id, revision)`, and evaluation also includes the admitted immutable cost and resource evidence IDs. Late or replacement evidence triggers reevaluation. The query layer excludes evidence from another build or revision and marks previous reports as stale. The builder withholds previous findings, summary outcomes, counts, readiness and screen-reader announcements until the current report is available.
+Build-derived results are keyed by `(build id, revision, snapshot content)`, and evaluation also includes the admitted cost and resource evidence content. Late or replacement evidence triggers reevaluation, including when an estimator reuses an ID. The query layer excludes placeholder evidence from an earlier snapshot, even when its ID and revision match, and marks previous reports as stale. The builder withholds previous findings, summary outcomes, counts, readiness and screen-reader announcements until the current report is available.
 
 ## Contracts and versioning
 
@@ -54,11 +54,16 @@ Build-derived results are keyed by `(build id, revision)`, and evaluation also i
 
 The website does **not** own compatibility policy. `src/domain/evaluator.ts` interprets the published `Ruleset` using the contract's three-valued semantics, and `tests/unit/evaluator-parity.test.ts` proves it matches the research reference interpreter: it reproduces `examples/evaluation-report.json` and matches `evaluate.py` output on 7 scenarios, running Python in CI. In `http` mode the API's `POST /builds/{id}/evaluate` result is used instead. The website adds only presentation: lettering, grouping, wording, and "compatible-options" buckets, which run the same ruleset on hypothetical substitutions.
 
+Candidate verdicts are displayed only when exactly one response matches the catalog item's ID and version. Missing, duplicate or failed results remain unknown, rather than borrowing a verdict for a different version.
+
+For local evaluation, the provider projects out catalog records whose IDs are referenced by enabled selections pinned to another kind or version. This prevents reference-interpreter metrics that look up an item by ID alone from using another version's facts; the interpreter and published rules remain unchanged. If multiple selections share an ID with different pins, the record is withheld conservatively for all of them. The HTTP service needs its own equivalent evidence admission; it has not been verified here.
+
 ## State management
 
-- **Server/data state** lives in TanStack Query. Catalog, graph, ruleset and pricebook use `staleTime: Infinity` because they are immutable. Build-derived queries are keyed by revision.
+- **Server/data state** lives in TanStack Query. Catalog, graph, ruleset and pricebook use `staleTime: Infinity` because they are immutable. Build-derived queries include the snapshot content as well as its ID and revision.
 - **Current draft** lives in `BuilderProvider` (React state). The `pyai.currentBuildId` key points at the draft in `LocalBuildRepository` (`pyai.build.<id>`, `pyai.builds.index`).
 - **URL state** holds selection-page filters, sort, compatibility bucket and compare list (query string), compare targets (`?ids=`, `?builds=`, `?revisions=`) and share payloads (`/shared#b1.<base64url>`, never sent to the server).
+- Imported JSON is limited to 5 MiB and 100 nested object/array levels for a bare build; the export envelope permits one additional level. Share payloads use the same nesting bounds and a 512 KiB byte limit. Exports remain available as backups when these limits are exceeded, with a warning that they cannot be re-imported. These bounds do not alter saved records.
 - **Theme** uses `pyai.theme`, applied before first paint by `public/theme-init.js`.
 
 ## Routes (sitemap)

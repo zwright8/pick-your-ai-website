@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { DATA_ERROR_TITLES, isDataError } from '../data/errors';
+import { isValidatorLoadFailure } from '../contracts';
 import { Icon } from './icon';
 
 // ----------------------------------------------------------------------------------- toast ----
@@ -170,9 +171,15 @@ export function ErrorState({
   onRetry?: () => void;
   title?: string;
 }) {
-  const heading =
-    title ?? (isDataError(error) ? DATA_ERROR_TITLES[error.kind] : 'Something went wrong');
-  const message = error instanceof Error ? error.message : String(error);
+  const validationFailed = isValidatorLoadFailure(error);
+  const heading = validationFailed
+    ? 'Build validation unavailable'
+    : (title ?? (isDataError(error) ? DATA_ERROR_TITLES[error.kind] : 'Something went wrong'));
+  const message = validationFailed
+    ? 'Could not load build validation. Reload the page and try again.'
+    : error instanceof Error
+      ? error.message
+      : String(error);
   return (
     <div role="alert" className="notice-error">
       <p className="notice-line">
@@ -191,7 +198,15 @@ export function ErrorState({
           </ul>
         </details>
       ) : null}
-      {onRetry ? (
+      {validationFailed ? (
+        <button
+          type="button"
+          className="btn btn-outline btn-small notice-action"
+          onClick={() => window.location.reload()}
+        >
+          Reload page
+        </button>
+      ) : onRetry ? (
         <button type="button" className="btn btn-outline btn-small notice-action" onClick={onRetry}>
           Try again
         </button>

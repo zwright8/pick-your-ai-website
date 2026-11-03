@@ -28,20 +28,23 @@ import type {
   Tier,
 } from '../contracts';
 import { KIND_LABELS, TIERS, TIER_LABELS, kindsInTier, labelInSentence } from '../contracts';
-import { addOrReplace } from '../domain/build';
+import { addOrReplace, replacementTarget, selectionMatchesItem } from '../domain/build';
+import { formatScaled, toScaled } from '../domain/decimal';
 import { evidenceDateLabel, itemFreshness } from '../domain/freshness';
 import { useBuilder } from '../app/builder-context';
 import { useData } from '../app/data-context';
 import { useCatalog, useCompatibleOptions, usePricebook } from '../app/queries';
 import { BILLING_LABELS, idToSlug, slugToId } from '../lib/catalog-view';
-import { itemPrice } from '../lib/item-cost';
+import { formatExactMoney, itemPrice } from '../lib/item-cost';
+import { uniqueOptionFor } from '../lib/compat';
+import { confirmVersionReplacement } from '../lib/selection-version';
 import { LAYERS, headlineKind, itemLogo, layerOf } from '../lib/layers';
 import { formatValue, humanize, specFields } from '../lib/schema-fields';
 import { EmptyState, ErrorState, Loading, useToast } from '../components/feedback';
 import { Icon } from '../components/icon';
-import { CompatChip, Money, PartsHead, type Verdict } from '../components/parts';
-import { OutcomeBadge, type Outcome } from '../components/status';
-import { costHeadline, formatMoney } from '../features/builder/analysis';
+import { CompatChip, Money, PartsHead } from '../components/parts';
+import { OutcomeBadge, SyntheticBadge, type Outcome } from '../components/status';
+import { costHeadline } from '../features/builder/analysis';
 
 const SLOTS = 3;
 const DEFAULT_TIER: Tier = 'T1';
@@ -153,6 +156,7 @@ function BuildComparePage({ children }: { children: ReactNode }) {
 }
 
 function ComponentCompare() {
+  const { mode: dataMode } = useData();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
   const catalog = useCatalog();
@@ -187,6 +191,12 @@ function ComponentCompare() {
   };
   const slots = Array.from({ length: SLOTS }, (_, index) => slotItem(index));
   const filled = slots.filter(Boolean) as CatalogItem[];
+  const syntheticSlots = slots.flatMap((item, index) =>
+    item?.tags?.includes('synthetic') ? [`Slot ${index + 1}: ${item.name}`] : [],
+  );
+  const missingSlots =
+    requestedIds?.flatMap((id, index) => (id && !catalog.byId.has(id) ? [index + 1] : [])) ?? [];
+  const missingCount = missingSlots.length;
   const mixedTiers = new Set(filled.map((item) => item.tier)).size > 1;
 
   /** A slot lists this tier's products, plus a selected product that came from another tier. */
@@ -199,6 +209,10 @@ function ComponentCompare() {
         {option.tier === tier ? '' : ` (${option.tier} ${TIER_LABELS[option.tier]})`}
       </option>
     ));
+  const missingSlotOption = (item: CatalogItem | undefined, index: number) => {
+    const id = requestedIds?.[index];
+    return !item && id ? <option value={id}>Unavailable component</option> : null;
+  };
 
   const updateIds = (next: (string | undefined)[]) => {
     const trimmed = [...next];
@@ -215,7 +229,11 @@ function ComponentCompare() {
   };
 
   const setSlot = (index: number, value: string) => {
-    updateIds(Array.from({ length: SLOTS }, (_, i) => (i === index ? value : slots[i]?.id)));
+    updateIds(
+      Array.from({ length: SLOTS }, (_, i) =>
+        i === index ? value : (requestedIds?.[i] ?? slots[i]?.id),
+      ),
+    );
   };
 
   const selectTier = (next: Tier) => {
@@ -231,10 +249,11 @@ function ComponentCompare() {
   };
 
   const isSelected = (item: CatalogItem) =>
-    Boolean(draft?.build.selections.some((selection) => selection.catalog_item_id === item.id));
+    Boolean(draft?.build.selections.some((selection) => selectionMatchesItem(selection, item)));
 
   const applyItem = (item: CatalogItem) => {
     if (!draft || isSelected(item)) return;
+    if (!confirmVersionReplacement(replacementTarget(draft.build, item.kind), item)) return;
     apply((build) => addOrReplace(build, item, catalogById), `Added ${item.name} from compare`, [
       item.kind,
     ]);
@@ -512,9 +531,20 @@ function ComponentCompare() {
         {catalog.isError ? (
           <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
         ) : !catalog.data ? (
-          <Loading label="Loading the demo catalog…" />
+          <Loading
+            label={dataMode === 'fixture' ? 'Loading the demo catalog…' : 'Loading the catalog…'}
+          />
         ) : (
           <>
+            {dataMode === 'http' && syntheticSlots.length ? (
+              <div className="pnotice">
+                <Icon name="info" />
+                <span style={{ overflowWrap: 'anywhere' }}>
+                  <strong>Synthetic catalog records in this comparison:</strong>{' '}
+                  {syntheticSlots.join('; ')}.
+                </span>
+              </div>
+            ) : null}
             <div className="pbar">
               <div className="pbar-field">
                 <Icon name="compare" />
@@ -534,6 +564,17 @@ function ComponentCompare() {
               </div>
             </div>
 
+            {missingCount > 0 ? (
+              <div className="pnotice pnotice-warn" role="status">
+                <Icon name="alert" />
+                <span>
+                  {missingCount} component{missingCount === 1 ? '' : 's'} from this link could not
+                  be found in the current catalog. Replace or clear{' '}
+                  {missingCount === 1 ? 'slot' : 'slots'} {missingSlots.join(', ')}.
+                </span>
+              </div>
+            ) : null}
+
             {/* The table head is hidden on small screens, so the slot pickers get their own block. */}
             <div className="pcmp-slots">
               {slots.map((item, index) => (
@@ -544,10 +585,15 @@ function ComponentCompare() {
                   <select
                     id={`mslot-${index}`}
                     className="pbar-input"
-                    value={item?.id ?? ''}
+                    value={item?.id ?? requestedIds?.[index] ?? ''}
                     onChange={(e) => setSlot(index, e.target.value)}
                   >
-                    <option value="">Choose a component…</option>
+                    <option value="">
+                      {!item && requestedIds?.[index]
+                        ? 'Clear unavailable component'
+                        : 'Choose a component…'}
+                    </option>
+                    {missingSlotOption(item, index)}
                     {slotOptions(item)}
                   </select>
                 </div>
@@ -577,10 +623,15 @@ function ComponentCompare() {
                               id={`slot-${index}`}
                               className="pbar-input"
                               style={{ fontWeight: 400 }}
-                              value={item?.id ?? ''}
+                              value={item?.id ?? requestedIds?.[index] ?? ''}
                               onChange={(e) => setSlot(index, e.target.value)}
                             >
-                              <option value="">Choose a component…</option>
+                              <option value="">
+                                {!item && requestedIds?.[index]
+                                  ? 'Clear unavailable component'
+                                  : 'Choose a component…'}
+                              </option>
+                              {missingSlotOption(item, index)}
                               {slotOptions(item)}
                             </select>
                             {item ? (
@@ -595,11 +646,16 @@ function ComponentCompare() {
                                   <Link to={`/catalog/${item.kind}/${idToSlug(item.id)}`}>
                                     {item.name}
                                   </Link>
+                                  {dataMode === 'http' && item.tags?.includes('synthetic') ? (
+                                    <SyntheticBadge />
+                                  ) : null}
                                   <span className="pt-sub">{KIND_LABELS[item.kind]}</span>
                                 </span>
                               </div>
                             ) : (
-                              <span className="cmp-empty">Empty slot</span>
+                              <span className="cmp-empty">
+                                {requestedIds?.[index] ? 'Unavailable component' : 'Empty slot'}
+                              </span>
                             )}
                           </div>
                         </th>
@@ -638,7 +694,8 @@ function ComponentCompare() {
 
             <div className="pt-foot">
               <span className="pbar-meta">
-                Rows marked ≠ differ between the selected parts · synthetic demo data · not a quote
+                Rows marked ≠ differ between the selected parts ·{' '}
+                {dataMode === 'fixture' ? 'synthetic demo data · ' : ''}not a quote
               </span>
               <Link className="pbtn" to={`/catalog?layer=${tier}`}>
                 Choose other parts <Icon name="arrow-right" />
@@ -671,8 +728,7 @@ function FitCell({ item }: { item: CatalogItem }) {
   if (options.isError) return <span className="pchip pchip-unknown">Could not check</span>;
   if (!options.data || options.isPlaceholderData)
     return <span className="cmp-empty">Checking…</span>;
-  const verdict = (options.data.find((o) => o.catalog_item_id === item.id)?.verdict ??
-    'unknown') as Verdict;
+  const verdict = uniqueOptionFor(options.data, item.id, item.version)?.verdict ?? 'unknown';
   return <CompatChip verdict={verdict} />;
 }
 
@@ -759,11 +815,11 @@ function BadParams({ children }: { children: ReactNode }) {
 function useSideAnalysis(build: BuildSnapshot) {
   const { compatibility, pricing } = useData();
   const evaluation = useQuery({
-    queryKey: ['compare', 'evaluation', build.id, build.revision],
+    queryKey: ['compare', 'evaluation', build.id, build.revision, build],
     queryFn: () => compatibility.evaluate(build),
   });
   const cost = useQuery({
-    queryKey: ['compare', 'cost', build.id, build.revision],
+    queryKey: ['compare', 'cost', build.id, build.revision, build],
     queryFn: () => pricing.estimate(build),
   });
   return { evaluation, cost };
@@ -813,20 +869,44 @@ interface SelectionDiff {
 }
 
 function diffSelections(a: BuildSnapshot, b: BuildSnapshot): SelectionDiff[] {
-  const key = (s: Selection) => `${s.kind}|${s.role}`;
-  const mapA = new Map(a.selections.map((s) => [key(s), s]));
-  const mapB = new Map(b.selections.map((s) => [key(s), s]));
+  const paired = new Map<number, number>();
+  const used = new Set<number>();
+  // Reserve stable identities first: a promotion can change a selection's role between revisions.
+  if (a.id === b.id) {
+    a.selections.forEach((selection, index) => {
+      const match = b.selections.findIndex(
+        (candidate, i) =>
+          !used.has(i) && candidate.id === selection.id && candidate.kind === selection.kind,
+      );
+      if (match !== -1) {
+        paired.set(index, match);
+        used.add(match);
+      }
+    });
+  }
+  // Independent builds may use different IDs for the same slot. Pair remaining slots once each.
+  a.selections.forEach((selection, index) => {
+    if (paired.has(index)) return;
+    const match = b.selections.findIndex(
+      (candidate, i) =>
+        !used.has(i) && candidate.kind === selection.kind && candidate.role === selection.role,
+    );
+    if (match !== -1) {
+      paired.set(index, match);
+      used.add(match);
+    }
+  });
   const out: SelectionDiff[] = [];
-  for (const k of new Set([...mapA.keys(), ...mapB.keys()])) {
-    const sa = mapA.get(k);
-    const sb = mapB.get(k);
-    const ref = (sa ?? sb)!;
+  const append = (sa: Selection | undefined, sb: Selection | undefined) => {
+    const ref = sa ?? sb;
+    if (!ref) return;
     let change: ChangeKind = 'unchanged';
     if (!sa) change = 'added';
     else if (!sb) change = 'removed';
     else if (
       sa.catalog_item_id !== sb.catalog_item_id ||
-      sa.catalog_item_version !== sb.catalog_item_version
+      sa.catalog_item_version !== sb.catalog_item_version ||
+      sa.role !== sb.role
     )
       change = 'changed';
     else if (
@@ -834,8 +914,22 @@ function diffSelections(a: BuildSnapshot, b: BuildSnapshot): SelectionDiff[] {
       JSON.stringify(sa.settings) !== JSON.stringify(sb.settings)
     )
       change = 'settings';
-    out.push({ key: k, kind: ref.kind, role: ref.role, a: sa, b: sb, change });
-  }
+    out.push({
+      key: `selection-${out.length}`,
+      kind: ref.kind,
+      role: ref.role,
+      a: sa,
+      b: sb,
+      change,
+    });
+  };
+  a.selections.forEach((selection, index) => {
+    const match = paired.get(index);
+    append(selection, match === undefined ? undefined : b.selections[match]);
+  });
+  b.selections.forEach((selection, index) => {
+    if (!used.has(index)) append(undefined, selection);
+  });
   return out;
 }
 
@@ -849,10 +943,17 @@ function BuildDiff({ a, b }: { a: Side; b: Side }) {
   const right = useSideAnalysis(b.build);
   const [showUnchanged, setShowUnchanged] = useState(false);
   const byId = catalog.byId;
-  const itemName = (s: Selection | undefined) => {
+  const itemName = (s: Selection | undefined, showRole = false, showVersion = false) => {
     if (!s) return '—';
-    const item = byId.get(s.catalog_item_id);
-    return `${item?.name ?? `${s.catalog_item_id} (not in this catalog)`}${s.enabled ? '' : ' (disabled)'}`;
+    const candidate = byId.get(s.catalog_item_id);
+    const item = candidate?.kind === s.kind ? candidate : undefined;
+    const version =
+      item && item.version !== s.catalog_item_version
+        ? ` (current catalog name; selected version: ${s.catalog_item_version}; catalog version: ${item.version})`
+        : showVersion
+          ? ` (version: ${s.catalog_item_version})`
+          : '';
+    return `${item?.name ?? `${s.catalog_item_id} (not in this catalog)`}${s.enabled ? '' : ' (disabled)'}${showRole ? ` (role: ${s.role})` : ''}${version}`;
   };
 
   const diffs = diffSelections(a.build, b.build);
@@ -975,8 +1076,24 @@ function BuildDiff({ a, b }: { a: Side; b: Side }) {
                             {d.role !== 'primary' ? <span className="pt-sub">{d.role}</span> : null}
                           </span>
                         </th>
-                        <td data-label="A">{itemName(d.a)}</td>
-                        <td data-label="B">{itemName(d.b)}</td>
+                        <td data-label="A">
+                          {itemName(
+                            d.a,
+                            Boolean(d.a && d.b && d.a.role !== d.b.role),
+                            Boolean(
+                              d.a && d.b && d.a.catalog_item_version !== d.b.catalog_item_version,
+                            ),
+                          )}
+                        </td>
+                        <td data-label="B">
+                          {itemName(
+                            d.b,
+                            Boolean(d.a && d.b && d.a.role !== d.b.role),
+                            Boolean(
+                              d.a && d.b && d.a.catalog_item_version !== d.b.catalog_item_version,
+                            ),
+                          )}
+                        </td>
                         <td data-label="Change">
                           <ChangeLabel change={d.change} />
                         </td>
@@ -1196,6 +1313,7 @@ function CostDiff({
   left: QueryLike<CostEstimate>;
   right: QueryLike<CostEstimate>;
 }) {
+  const { mode: dataMode } = useData();
   const ca = left.data;
   const cb = right.data;
   let body;
@@ -1211,8 +1329,12 @@ function CostDiff({
       ca.coverage === 'complete' &&
       cb.coverage === 'complete' &&
       ca.currency === cb.currency &&
+      ca.total.currency === ca.currency &&
+      cb.total.currency === cb.currency &&
       ca.period_days === cb.period_days;
-    const delta = comparable ? Number(cb.total.amount) - Number(ca.total.amount) : null;
+    const amountA = toScaled(ca.total.amount);
+    const amountB = toScaled(cb.total.amount);
+    const delta = comparable && amountA !== null && amountB !== null ? amountB - amountA : null;
     body = (
       <>
         <div className="pt-wrap">
@@ -1258,21 +1380,23 @@ function CostDiff({
           {delta !== null ? (
             <>
               <strong>Difference (B − A):</strong>{' '}
-              {delta === 0
+              {delta === 0n
                 ? 'no change'
-                : `${delta > 0 ? '+' : '−'}${formatMoney(String(Math.abs(delta)), ca.currency)} per ${ca.period_days} days`}
-              .
+                : `${delta > 0n ? '+' : '−'}${formatExactMoney(formatScaled(delta < 0n ? -delta : delta, 12), ca.currency)} per ${ca.period_days} days`}
+              . Calculated from unrounded totals.
             </>
           ) : (
             <>
-              <strong>Difference not computed:</strong> at least one estimate is incomplete or uses
-              a different currency or period, so subtracting the totals would be misleading.
+              <strong>Difference not computed:</strong> at least one estimate is incomplete, has an
+              invalid amount or currency, or uses a different currency or period.
             </>
           )}
         </p>
         <p className="pbox-note">
-          {ha.detail} {hb.detail !== ha.detail ? hb.detail : ''} Synthetic demo prices — not a
-          quote.
+          {ha.detail} {hb.detail !== ha.detail ? hb.detail : ''}{' '}
+          {dataMode === 'fixture'
+            ? 'Synthetic demo prices — not a quote.'
+            : 'Estimated prices — not a quote.'}
         </p>
       </>
     );

@@ -4,7 +4,8 @@ import { createFixtureProviders } from '../../src/data/fixture/providers';
 import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import type { FetchLike } from '../../src/data/http/client';
 import { createHttpProviders } from '../../src/data/http/providers';
-import { CATALOG, NOW, apiChat, resourceEstimate } from './scenarios';
+import { updateObjectives } from '../../src/domain/build';
+import { CATALOG, NOW, apiChat, buildWith, resourceEstimate } from './scenarios';
 
 const fixture = createFixtureProviders({ now: () => NOW });
 const json = (value: unknown) =>
@@ -28,6 +29,20 @@ function pinnedBuild() {
 }
 
 describe('HTTP evaluation response context', () => {
+  it('rejects inconsistent cost evidence before sending it for evaluation', async () => {
+    const build = pinnedBuild();
+    const cost = await fixture.pricing.estimate(build);
+    cost.total.currency = 'EUR';
+    const api = responseApi({});
+    await expect(
+      providers(api).compatibility.evaluate(build, { costEstimate: cost }),
+    ).rejects.toMatchObject({
+      kind: 'malformed',
+      contract: 'CostEstimate',
+    });
+    expect(api).not.toHaveBeenCalled();
+  });
+
   const foreignLocks = {
     catalog_snapshot_id: 'catalog.foreign',
     ruleset_id: 'ruleset.foreign',
@@ -155,7 +170,64 @@ describe('HTTP evaluation response context', () => {
   );
 });
 
+it('does not use inconsistent currency evidence for the local budget rule', async () => {
+  const build = updateObjectives(buildWith([['cost_policy', 'hard-cap']], apiChat()), {
+    monthly_budget_amount: '10000.00',
+  });
+  const cost = await fixture.pricing.estimate(build);
+  expect(cost.coverage).toBe('complete');
+  const valid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    valid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('pass');
+  cost.total.currency = 'EUR';
+  const invalid = await fixture.compatibility.evaluate(build, { costEstimate: cost });
+  expect(
+    invalid.findings.find((finding) => finding.rule_id === 'rule.budget.monthly.cap')?.outcome,
+  ).toBe('unknown');
+});
+
 describe('HTTP cost response context', () => {
+  it('accepts a consistent foreign-currency estimate without converting it', async () => {
+    const build = pinnedBuild();
+    const estimate = structuredClone(await fixture.pricing.estimate(build));
+    estimate.currency = 'EUR';
+    estimate.subtotal.currency = 'EUR';
+    estimate.tax.currency = 'EUR';
+    estimate.total.currency = 'EUR';
+    for (const line of estimate.line_items) {
+      line.unit_price.currency = 'EUR';
+      line.amount.currency = 'EUR';
+    }
+    assertContract('CostEstimate', estimate);
+    await expect(providers(responseApi(estimate)).pricing.estimate(build)).resolves.toEqual(
+      estimate,
+    );
+  });
+
+  it.each(['subtotal', 'tax', 'total', 'line amount', 'unit price'] as const)(
+    'rejects a schema-valid estimate with inconsistent %s currency',
+    async (field) => {
+      const build = pinnedBuild();
+      const estimate = await fixture.pricing.estimate(build);
+      const line = estimate.line_items[0];
+      if (!line) throw new Error('Expected a priced fixture line');
+      const altered = structuredClone(estimate);
+      if (field === 'subtotal' || field === 'tax' || field === 'total') {
+        altered[field].currency = 'EUR';
+      } else {
+        const first = altered.line_items[0];
+        if (!first) throw new Error('Expected a priced fixture line');
+        (field === 'line amount' ? first.amount : first.unit_price).currency = 'EUR';
+      }
+      assertContract('CostEstimate', altered);
+      await expect(providers(responseApi(altered)).pricing.estimate(build)).rejects.toMatchObject({
+        kind: 'malformed',
+        contract: 'CostEstimate',
+      });
+    },
+  );
+
   it.each(['locked', 'configured'] as const)(
     'rejects a schema-valid foreign %s pricebook',
     async (source) => {

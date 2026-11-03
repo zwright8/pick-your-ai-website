@@ -22,7 +22,7 @@ export function declaresLicence(item: CatalogItem): boolean {
 /** Short access summary: the declared licence, or an explicit "not declared". */
 export function accessSummary(item: CatalogItem): string {
   const spdx = item.license?.spdx_id;
-  return spdx ? `Declared licence ${spdx}` : 'No licence declared in this demo record';
+  return spdx ? `Declared licence ${spdx}` : 'No licence declared in this record';
 }
 
 const VERIFICATION_ORDER: Provenance['verification_status'][] = [
@@ -58,13 +58,13 @@ export function verificationLabel(status: Provenance['verification_status']): st
  */
 export function recordLine(item: CatalogItem): string {
   const status = verificationLabel(strongestVerification(item));
-  return `${status} demo record · ${item.description ?? 'No description recorded'}`;
+  return `${status} record · ${item.description ?? 'No description recorded'}`;
 }
 
 /** Licence/access line: SPDX id plus the two flags the contract records, or "not declared". */
 export function licenseLine(item: CatalogItem): string {
   const license = item.license;
-  if (!license?.spdx_id) return 'No licence declared in this demo record';
+  if (!license?.spdx_id) return 'No licence declared in this record';
   const flags: string[] = [];
   if (license.commercial_use_allowed !== undefined)
     flags.push(license.commercial_use_allowed ? 'commercial use allowed' : 'no commercial use');

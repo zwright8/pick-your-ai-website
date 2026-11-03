@@ -34,6 +34,12 @@ export type { ContractValidationError };
 type ValidatorModule = typeof import('./generated/validators.js');
 
 let VALIDATORS: Record<ContractName, ContractValidateFunction> | null = null;
+export type ValidatorStatus = 'loading' | 'ready' | 'failed';
+let validatorStatus: ValidatorStatus = 'loading';
+let validatorFailure: unknown;
+export const getValidatorStatus = (): ValidatorStatus => validatorStatus;
+export const isValidatorLoadFailure = (error: unknown): boolean =>
+  validatorStatus === 'failed' && error === validatorFailure;
 
 /*
  * The generated validators are large (~50 kB gzipped, ~720 kB unminified), so they load as a
@@ -66,7 +72,17 @@ function loadValidators(): Promise<void> {
 
 export const validatorsReady: Promise<void> = new Promise<void>((resolve, reject) => {
   afterFirstPaint(() => {
-    loadValidators().then(resolve, reject);
+    loadValidators().then(
+      () => {
+        validatorStatus = 'ready';
+        resolve();
+      },
+      (cause) => {
+        validatorFailure = cause;
+        validatorStatus = 'failed';
+        reject(cause);
+      },
+    );
   });
 });
 
@@ -82,7 +98,10 @@ export function validateContract<N extends ContractName>(
     return {
       ok: false,
       errors: [],
-      summary: 'Contract validators are still loading; try again in a moment.',
+      summary:
+        validatorStatus === 'failed'
+          ? 'Could not load build validation. Reload the page and try again.'
+          : 'Contract validators are still loading; try again in a moment.',
     };
   }
   const validate = VALIDATORS[name];

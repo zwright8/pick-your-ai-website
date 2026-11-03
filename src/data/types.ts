@@ -33,18 +33,25 @@ export interface SavedBuildSummary {
   revision: number;
   updatedAt: string;
   selectionCount: number;
+  /** Opaque, in-memory token for checking that the confirmed record is unchanged. */
+  deleteToken?: string;
 }
 
 export interface BuildRepository {
   list(): Promise<SavedBuildSummary[]>;
   /** Returns the head revision and the retained revision history (oldest first). */
   get(buildId: string): Promise<StoredBuild>;
+  /** Recover a valid local head when its stored history is damaged, without changing the record. */
+  recoverHead?(buildId: string): Promise<BuildSnapshot>;
+  /** Rebuild a missing or damaged local library index from existing stored records. */
+  rebuildIndex?(): Promise<number>;
   /**
-   * Saves a new head. `expectedRevision` is the revision the caller started from (compare-and-swap);
+   * Saves a new head. A null `expectedRevision` creates a build and conflicts if its ID exists.
+   * Otherwise, `expectedRevision` is the revision the caller started from (compare-and-swap);
    * a mismatch rejects with DataError('conflict') and never overwrites the other change.
    */
   save(build: StoredBuild, expectedRevision: number | null): Promise<StoredBuild>;
-  remove(buildId: string): Promise<void>;
+  remove(buildId: string, deleteToken?: string): Promise<void>;
 }
 
 export interface StoredBuild {
@@ -106,6 +113,8 @@ export interface EvidenceProvider {
 
 export interface DataProviders {
   mode: 'fixture' | 'http';
+  /** Whether build snapshots are saved locally or sent to the configured API. */
+  buildStore: 'local' | 'http';
   catalog: CatalogRepository;
   builds: BuildRepository;
   compatibility: CompatibilityEvaluator;

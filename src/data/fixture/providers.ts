@@ -17,8 +17,13 @@ import { BASELINE_GRAPH, BASELINE_RULESET, assertContract, validatorsReady } fro
 import { estimateCost } from '../../domain/cost';
 import { evaluateBuild } from '../../domain/evaluator';
 import { DataError } from '../errors';
+import { hasConsistentCostCurrency } from '../cost-evidence';
 import { LocalBuildRepository } from '../local-builds';
-import { ProvenanceEvidenceProvider, compatibleOptionsLocal } from '../shared';
+import {
+  ProvenanceEvidenceProvider,
+  catalogForBuildEvidence,
+  compatibleOptionsLocal,
+} from '../shared';
 import type {
   CatalogRepository,
   CompatibilityEvaluator,
@@ -57,6 +62,8 @@ export class FixtureCatalogRepository implements CatalogRepository {
       graph: assertContract('DependencyGraph', opts.graph ?? BASELINE_GRAPH),
       ruleset: assertContract('Ruleset', opts.ruleset ?? BASELINE_RULESET),
     }));
+    // Consumers still await the original rejected promise; observe early failures until they do.
+    void this.data.catch(() => undefined);
     this.latency = opts.latencyMs ?? 0;
   }
   async getSnapshot(snapshotId?: string) {
@@ -103,10 +110,13 @@ export class LocalCompatibilityEvaluator implements CompatibilityEvaluator {
     ]);
     const report = evaluateBuild({
       build,
-      catalog: snapshot,
+      catalog: catalogForBuildEvidence(build, snapshot),
       ruleset,
       resourceEstimate: evidence.resourceEstimate ?? null,
-      costEstimate: evidence.costEstimate ?? null,
+      costEstimate:
+        evidence.costEstimate && hasConsistentCostCurrency(evidence.costEstimate)
+          ? evidence.costEstimate
+          : null,
       evaluatedAt: this.now(),
     });
     return assertContract('EvaluationReport', report);
@@ -133,6 +143,8 @@ export class FixturePricingProvider implements PricingProvider {
     this.pricebook = validatorsReady.then(() =>
       assertContract('Pricebook', opts.pricebook ?? DEMO_PRICEBOOK),
     );
+    // Consumers still await the original rejected promise; observe early failures until they do.
+    void this.pricebook.catch(() => undefined);
     this.now = opts.now ?? (() => new Date().toISOString());
   }
   async getPricebook(pricebookId?: string) {
@@ -168,6 +180,7 @@ export function createFixtureProviders(opts: FixtureOptions = {}): DataProviders
   const catalog = new FixtureCatalogRepository(opts);
   return {
     mode: 'fixture',
+    buildStore: 'local',
     catalog,
     builds: new LocalBuildRepository(),
     compatibility: new LocalCompatibilityEvaluator(catalog, opts.now),

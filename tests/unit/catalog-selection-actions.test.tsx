@@ -10,10 +10,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useBuilder } from '../../src/app/builder-context';
 import { DataContext } from '../../src/app/data-context';
 import type { BuildSnapshot, ComponentKind } from '../../src/contracts';
+import { assertContract } from '../../src/contracts';
 import { createFixtureProviders } from '../../src/data/fixture/providers';
 import { addOrReplace, createDraft, setEnabled, updateSettings } from '../../src/domain/build';
 import { estimateCost } from '../../src/domain/cost';
@@ -22,6 +23,7 @@ import { PartList } from '../../src/features/catalog/PartList';
 import { BY_ID, NOW, buildWith, apiChat, item, selfHosted } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
+afterEach(() => vi.restoreAllMocks());
 
 function show(
   build: BuildSnapshot,
@@ -54,7 +56,7 @@ function show(
       </DataContext.Provider>
     </QueryClientProvider>,
   );
-  return { ...view, apply, compatibleOptions };
+  return { ...view, apply, compatibleOptions, client };
 }
 
 const withTool = () => buildWith([...apiChatPicks(), ['tool', 'search']]);
@@ -70,6 +72,248 @@ function apiChatPicks(): [string, string][] {
 }
 
 describe('catalog selection actions', () => {
+  it.each(['sel_workload', 'sel_missing'])(
+    'blocks a replacement link targeting the wrong or missing slot (%s)',
+    async (target) => {
+      const { apply } = show(apiChat(), `/catalog/model?show=all&replace=${target}`, 'model');
+      const row = await screen.findByRole('row', { name: /Demo Aurora Mini/ });
+      expect(within(row).getByRole('button', { name: 'Add' })).toBeDisabled();
+      expect(screen.getByText(/replacement unavailable/i)).toBeVisible();
+      expect(apply).not.toHaveBeenCalled();
+    },
+  );
+
+  it('blocks an ambiguous replacement slot', async () => {
+    const build = apiChat();
+    const model = build.selections.find((selection) => selection.id === 'sel_model');
+    if (!model) throw new Error('Missing model');
+    build.selections = [...build.selections, { ...model, role: 'secondary' }];
+    const { apply } = show(build, '/catalog/model?show=all&replace=sel_model', 'model');
+    const row = await screen.findByRole('row', { name: /Demo Aurora Mini/ });
+    expect(within(row).getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(screen.getByText(/replacement unavailable/i)).toBeVisible();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'allows choosing the current version when the selected version is older (replacement: %s)',
+    async (replacement) => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const current = item('model', 'aurora-large');
+      const build = apiChat();
+      build.selections = build.selections.map((selection) =>
+        selection.id === 'sel_model'
+          ? { ...selection, catalog_item_version: 'older-version' }
+          : selection,
+      );
+      const { apply } = show(
+        build,
+        `/catalog/model?show=all${replacement ? '&replace=sel_model' : ''}`,
+        'model',
+      );
+      const row = await screen.findByRole('row', { name: /Demo Aurora Large/ });
+      await waitFor(() => expect(row).toHaveTextContent('$324'));
+      const button = within(row).getByRole('button', { name: 'Add' });
+      expect(button).toBeEnabled();
+      await userEvent.click(button);
+      expect(confirm).toHaveBeenCalledWith(
+        expect.stringContaining("reset this component's settings"),
+      );
+      const change = apply.mock.calls[0]?.[0];
+      expect(change).toBeTypeOf('function');
+      expect(
+        change(build).selections.find((selection: { id: string }) => selection.id === 'sel_model')
+          ?.catalog_item_version,
+      ).toBe(current.version);
+    },
+  );
+
+  it('does not ask to reset settings when adding a separate version as an additional selection', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    const build = apiChat();
+    build.selections = build.selections.map((selection) =>
+      selection.id === 'sel_model'
+        ? { ...selection, catalog_item_version: 'older-version' }
+        : selection,
+    );
+    const { apply } = show(build, '/catalog/model?show=all&add=1', 'model');
+    const row = await screen.findByRole('row', { name: /Demo Aurora Large/ });
+    await userEvent.click(within(row).getByRole('button', { name: 'Add' }));
+    expect(confirm).not.toHaveBeenCalled();
+    const [change] = apply.mock.calls[0] as [(build: BuildSnapshot) => BuildSnapshot];
+    expect(change(build).selections.filter((selection) => selection.kind === 'model')).toHaveLength(
+      2,
+    );
+  });
+
+  it.each([false, true])(
+    'keeps the older selection when the settings reset is cancelled (replacement: %s)',
+    async (replacement) => {
+      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const build = apiChat();
+      build.selections = build.selections.map((selection) =>
+        selection.id === 'sel_model'
+          ? { ...selection, catalog_item_version: 'older-version' }
+          : selection,
+      );
+      const { apply } = show(
+        build,
+        `/catalog/model?show=all${replacement ? '&replace=sel_model' : ''}`,
+        'model',
+      );
+      const row = await screen.findByRole('row', { name: /Demo Aurora Large/ });
+      await userEvent.click(within(row).getByRole('button', { name: 'Add' }));
+      expect(apply).not.toHaveBeenCalled();
+      expect(
+        build.selections.find((selection) => selection.id === 'sel_model')?.catalog_item_version,
+      ).toBe('older-version');
+    },
+  );
+
+  it('changes a cached compatible verdict to unknown when the returned version changes', async () => {
+    const model = item('model', 'aurora-mini');
+    let version = model.version;
+    const { client, unmount } = show(apiChat(), '/catalog/model?show=all', 'model', (providers) => {
+      vi.spyOn(providers.compatibility, 'compatibleOptions').mockImplementation(async () => [
+        {
+          catalog_item_id: model.id,
+          catalog_item_version: version,
+          verdict: 'compatible',
+          rule_ids: [],
+        },
+      ]);
+    });
+    const row = await screen.findByRole('row', { name: /Demo Aurora Mini/ });
+    expect(await within(row).findByText('Compatible', { exact: true })).toBeVisible();
+    version = '9.0.0';
+    await client.invalidateQueries({ queryKey: ['compat-kind'] });
+    expect(await within(row).findByText('Unknown', { exact: true })).toBeVisible();
+    unmount();
+    client.clear();
+  });
+
+  it.each(['asc', 'desc'])(
+    'puts missing specification values after known values in %s order',
+    async (dir) => {
+      show(
+        apiChat(),
+        `/catalog/model_provider?show=all&sort=spec%3Asupported_auth&dir=${dir}`,
+        'model_provider',
+      );
+      const region = await screen.findByRole('region', { name: 'Scrollable part list' });
+      const missing = await within(region).findByRole('row', { name: /Demo Open Weights Lab/ });
+      const known = await within(region).findByRole('row', { name: /Demo Provider Aurora/ });
+      const rows = within(region).getAllByRole('row');
+      expect(rows.indexOf(known)).toBeLessThan(rows.indexOf(missing));
+    },
+  );
+
+  it.each(['asc', 'desc'])('keeps missing numeric specifications last in %s order', async (dir) => {
+    show(
+      apiChat(),
+      `/catalog/integration?show=all&sort=spec%3Arate_limit_per_minute&dir=${dir}`,
+      'integration',
+    );
+    const region = await screen.findByRole('region', { name: 'Scrollable part list' });
+    const missing = await within(region).findByRole('row', { name: /Demo Webhook Notifier/ });
+    const known = await within(region).findByRole('row', { name: /Demo Helpdesk API/ });
+    const rows = within(region).getAllByRole('row');
+    expect(rows.indexOf(known)).toBeLessThan(rows.indexOf(missing));
+  });
+
+  it.each([
+    ['asc', 'Demo Open Weights Lab', 'Demo Provider Aurora'],
+    ['desc', 'Demo Provider Aurora', 'Demo Open Weights Lab'],
+  ])('sorts displayed array values lexically in %s order', async (dir, first, second) => {
+    show(
+      apiChat(),
+      `/catalog/model_provider?show=all&sort=spec%3Asupported_auth&dir=${dir}`,
+      'model_provider',
+      (providers) => {
+        const getSnapshot = providers.catalog.getSnapshot.bind(providers.catalog);
+        vi.spyOn(providers.catalog, 'getSnapshot').mockImplementation(async (...args) => {
+          const snapshot = await getSnapshot(...args);
+          return assertContract('CatalogSnapshot', {
+            ...snapshot,
+            items: snapshot.items.map((entry) =>
+              entry.kind !== 'model_provider'
+                ? entry
+                : {
+                    ...entry,
+                    spec: {
+                      ...entry.spec,
+                      supported_auth:
+                        entry.id === item('model_provider', 'aurora').id
+                          ? ['service_account']
+                          : ['api_key', 'oauth2'],
+                    },
+                  },
+            ),
+          });
+        });
+      },
+    );
+    const region = await screen.findByRole('region', { name: 'Scrollable part list' });
+    const firstRow = await within(region).findByRole('row', { name: new RegExp(first) });
+    const secondRow = await within(region).findByRole('row', { name: new RegExp(second) });
+    const rows = within(region).getAllByRole('row');
+    expect(rows.indexOf(firstRow)).toBeLessThan(rows.indexOf(secondRow));
+  });
+
+  it.each(['asc', 'desc'])(
+    'groups complete, partial, and unknown prices when sorting %s',
+    async (dir) => {
+      show(apiChat(), `/catalog/model?show=all&sort=cost&dir=${dir}`, 'model', (providers) => {
+        const getSnapshot = providers.catalog.getSnapshot.bind(providers.catalog);
+        vi.spyOn(providers.catalog, 'getSnapshot').mockImplementation(async (...args) => {
+          const snapshot = await getSnapshot(...args);
+          return {
+            ...snapshot,
+            items: snapshot.items.map((entry) =>
+              entry.id === item('model', 'open-8b').id
+                ? { ...entry, billing_class: 'unknown' as const }
+                : entry,
+            ),
+          };
+        });
+      });
+      const region = await screen.findByRole('region', { name: 'Scrollable part list' });
+      await waitFor(() =>
+        expect(within(region).getByRole('row', { name: /Demo Aurora Large/ })).toHaveTextContent(
+          '$324',
+        ),
+      );
+      const rows = within(region)
+        .getAllByRole('row')
+        .filter((row) => row.querySelector('[data-label="Est. cost"]'));
+      const categories = rows.map((row) => {
+        const cell = row.querySelector('[data-label="Est. cost"]');
+        const text = cell?.textContent ?? '';
+        return text.includes('Unknown') ? 'unknown' : text.includes('≥') ? 'partial' : 'complete';
+      });
+      expect(categories).toContain('complete');
+      expect(categories).toContain('partial');
+      expect(categories).toContain('unknown');
+      expect(categories).toEqual(
+        [...categories].sort(
+          (a, b) =>
+            ['complete', 'partial', 'unknown'].indexOf(a) -
+            ['complete', 'partial', 'unknown'].indexOf(b),
+        ),
+      );
+      expect(within(region).getByRole('columnheader', { name: /Est\. cost/ })).toHaveAttribute(
+        'aria-sort',
+        'other',
+      );
+      expect(
+        within(region).getByRole('button', {
+          name: new RegExp(`${dir === 'asc' ? 'ascending' : 'descending'} within price groups`),
+        }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Complete estimates come first/)).toBeVisible();
+    },
+  );
+
   it('preserves a disabled model and its configured settings when revisited', async () => {
     const build = setEnabled(
       updateSettings(apiChat(), 'sel_model', { temperature: 0.37 }),

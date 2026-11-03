@@ -14,7 +14,8 @@
  */
 import type { BuildSnapshot, CatalogSnapshot, ComponentKind, ContractName } from '../../contracts';
 import { BASELINE_GRAPH, BASELINE_RULESET } from '../../contracts';
-import { DataError } from '../errors';
+import { DataError, isDataError } from '../errors';
+import { hasConsistentCostCurrency } from '../cost-evidence';
 import { LocalBuildRepository } from '../local-builds';
 import { ProvenanceEvidenceProvider } from '../shared';
 import type {
@@ -131,6 +132,11 @@ export class HttpCompatibilityEvaluator implements CompatibilityEvaluator {
     this.client = client;
   }
   async evaluate(build: BuildSnapshot, evidence: EvaluationEvidence = {}) {
+    if (evidence.costEstimate && !hasConsistentCostCurrency(evidence.costEstimate)) {
+      throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
+        contract: 'CostEstimate',
+      });
+    }
     const { id, revision } = build;
     const locks = { ...build.locks };
     const body: Record<string, unknown> = { build_revision: revision };
@@ -238,6 +244,11 @@ export class HttpPricingProvider implements PricingProvider {
         { contract: 'CostEstimate' },
       );
     }
+    if (!hasConsistentCostCurrency(value)) {
+      throw new DataError('malformed', 'Cost estimate contains inconsistent currencies.', {
+        contract: 'CostEstimate',
+      });
+    }
     return value;
   }
 }
@@ -256,6 +267,10 @@ export class HttpResourceEstimateProvider implements ResourceEstimateProvider {
 export class HttpBuildRepository implements BuildRepository {
   private readonly client: ContractHttpClient;
   private readonly local: LocalBuildRepository;
+  private readonly pendingWriteKeys = new Map<
+    string,
+    { key: string; inFlight: number; confirmed: boolean; failed: boolean }
+  >();
   constructor(client: ContractHttpClient, local = new LocalBuildRepository()) {
     this.client = client;
     this.local = local;
@@ -270,8 +285,16 @@ export class HttpBuildRepository implements BuildRepository {
     return { build: value, revisions: [value], changes: [] };
   }
   async save(stored: StoredBuild, expectedRevision: number | null): Promise<StoredBuild> {
-    const b = stored.build;
+    const submitted = structuredClone(stored);
+    const b = submitted.build;
     const { id, revision } = b;
+    if (Array.isArray(b.selections) && b.selections.length < 2) {
+      throw new DataError(
+        'malformed',
+        'Remote storage cannot save incomplete drafts. Use local storage or start with a complete template.',
+        { contract: 'BuildSnapshot' },
+      );
+    }
     // A saved revision must permit an exact +1 step in JavaScript. Capture the
     // submitted identity before awaiting so caller mutation cannot retarget it.
     const nextRevision = expectedRevision === null ? 1 : expectedRevision + 1;
@@ -288,27 +311,70 @@ export class HttpBuildRepository implements BuildRepository {
         { contract: 'BuildSnapshot' },
       );
     }
-    const { value } =
-      expectedRevision === null
-        ? await this.client.contract('BuildSnapshot', 'POST', '/builds', b, {
-            'Idempotency-Key': idempotencyKey(),
-          })
-        : await this.client.contract('BuildSnapshot', 'PUT', `/builds/${enc(id)}`, b, {
-            'If-Match': `"${expectedRevision}"`,
-            'Idempotency-Key': idempotencyKey(),
-          });
-    requireArtifactId('BuildSnapshot', value, id);
-    if (value.revision !== revision) {
-      throw new DataError('malformed', 'BuildSnapshot does not match the submitted revision.', {
-        contract: 'BuildSnapshot',
-      });
+    // Keep the key for an unconfirmed exact request so a retry can be deduplicated by the server.
+    const requestSignature = JSON.stringify([expectedRevision, b]);
+    let request = this.pendingWriteKeys.get(requestSignature);
+    if (!request) {
+      request = { key: idempotencyKey(), inFlight: 0, confirmed: false, failed: false };
+      this.pendingWriteKeys.set(requestSignature, request);
     }
-    const saved = { ...stored, build: value };
-    await this.local.save(saved, null);
-    return saved;
+    if (request.inFlight === 0) request.failed = false;
+    request.inFlight++;
+    try {
+      let cacheSnapshot: string | null | undefined;
+      let cacheSnapshotError: unknown;
+      try {
+        cacheSnapshot = this.local.remoteCacheSnapshot(id);
+      } catch (cause) {
+        cacheSnapshotError = cause;
+      }
+      const { value } =
+        expectedRevision === null
+          ? await this.client.contract('BuildSnapshot', 'POST', '/builds', b, {
+              'Idempotency-Key': request.key,
+            })
+          : await this.client.contract('BuildSnapshot', 'PUT', `/builds/${enc(id)}`, b, {
+              'If-Match': `"${expectedRevision}"`,
+              'Idempotency-Key': request.key,
+            });
+      requireArtifactId('BuildSnapshot', value, id);
+      if (value.revision !== revision) {
+        throw new DataError('malformed', 'BuildSnapshot does not match the submitted revision.', {
+          contract: 'BuildSnapshot',
+        });
+      }
+      const hasHead = submitted.revisions.some((item) => item.revision === revision);
+      const revisions = submitted.revisions.map((item) =>
+        item.revision === revision ? value : item,
+      );
+      const saved = {
+        ...submitted,
+        build: value,
+        revisions: hasHead ? revisions : [...revisions, value],
+      };
+      try {
+        if (cacheSnapshot === undefined) throw cacheSnapshotError;
+        await this.local.cacheRemote(saved, cacheSnapshot);
+      } catch (cause) {
+        throw new DataError(
+          isDataError(cause) && cause.kind === 'conflict' ? 'conflict' : 'unsupported',
+          "The remote save was accepted, but this browser's copy could not be updated. Check the remote build before retrying.",
+          { cause },
+        );
+      }
+      request.confirmed = true;
+      return saved;
+    } catch (error) {
+      request.failed = true;
+      throw error;
+    } finally {
+      request.inFlight--;
+      if (request.confirmed && request.inFlight === 0 && !request.failed)
+        this.pendingWriteKeys.delete(requestSignature);
+    }
   }
-  remove(buildId: string): Promise<void> {
-    return this.local.remove(buildId); // v1 has no delete; forget locally only.
+  remove(buildId: string, deleteToken?: string): Promise<void> {
+    return this.local.remove(buildId, deleteToken); // v1 has no delete; forget locally only.
   }
 }
 
@@ -316,6 +382,7 @@ export function createHttpProviders(cfg: HttpProviderConfig): DataProviders {
   const client = new ContractHttpClient({ baseUrl: cfg.baseUrl, fetch: cfg.fetch });
   return {
     mode: 'http',
+    buildStore: cfg.remoteBuilds ? 'http' : 'local',
     catalog: new HttpCatalogRepository(client, cfg),
     builds: cfg.remoteBuilds ? new HttpBuildRepository(client) : new LocalBuildRepository(),
     compatibility: new HttpCompatibilityEvaluator(client),

@@ -68,7 +68,7 @@ export function costHeadline(cost: CostEstimate | undefined): { text: string; de
   if (cost.coverage === 'complete') {
     return {
       text: `${total} / ${cost.period_days} days`,
-      detail: 'Synthetic estimate with complete coverage — not a quote.',
+      detail: 'Estimate with complete coverage — not a quote.',
     };
   }
   if (cost.coverage === 'partial') {

@@ -6,9 +6,9 @@
  * complete monthly figure. They now use the same coverage-aware presentation as the builder.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DataContext } from '../../src/app/data-context';
 import { ToastProvider } from '../../src/components/feedback';
 import type { BuildSnapshot } from '../../src/contracts';
@@ -19,6 +19,8 @@ import TemplatesPage from '../../src/pages/TemplatesPage';
 import { NOW, apiChat, buildWith } from './scenarios';
 
 vi.mock('../../src/app/builder-context', () => ({ useBuilder: vi.fn() }));
+
+beforeEach(() => localStorage.clear());
 
 const { useBuilder } = await import('../../src/app/builder-context');
 
@@ -104,6 +106,78 @@ describe('saved build cost coverage', () => {
     const metric = within(card).getByText('ESTIMATED BASELINE*').parentElement!;
     await waitFor(() => expect(metric).toHaveTextContent('≥ $14.40'));
     expect(metric).toHaveTextContent('lower bound');
+  });
+
+  it('groups currencies and periods and orders comparable amounts without rounding', async () => {
+    mockBuilder(null);
+    const providers = createFixtureProviders({ now: () => NOW });
+    const template = apiChat();
+    const examples = [
+      {
+        id: 'build.us-big',
+        name: 'US bigger',
+        currency: 'USD',
+        days: 30,
+        amount: '9007199254740993',
+      },
+      { id: 'build.euro', name: 'Euro', currency: 'EUR', days: 30, amount: '999' },
+      {
+        id: 'build.us-small',
+        name: 'US smaller',
+        currency: 'USD',
+        days: 30,
+        amount: '9007199254740992',
+      },
+      { id: 'build.week', name: 'US week', currency: 'USD', days: 7, amount: '99999999999999999' },
+      { id: 'build.partial', name: 'Partial', currency: 'EUR', days: 60, amount: '1' },
+      { id: 'build.unknown', name: 'Unknown', currency: 'EUR', days: 30, amount: '0' },
+    ];
+    for (const example of examples)
+      await providers.builds.save(
+        createDraft({ ...template, id: example.id, name: example.name }),
+        null,
+      );
+    const estimate = await providers.pricing.estimate(template);
+    vi.spyOn(providers.pricing, 'estimate').mockImplementation(async (build) => {
+      const example = examples.find((entry) => entry.id === build.id);
+      if (!example) throw new Error(`Unexpected build ${build.id}`);
+      return {
+        ...estimate,
+        build_id: build.id,
+        currency: example.currency,
+        period_days: example.days,
+        total: { amount: example.amount, currency: example.currency },
+        coverage:
+          build.id === 'build.partial'
+            ? 'partial'
+            : build.id === 'build.unknown'
+              ? 'unknown'
+              : 'complete',
+      };
+    });
+    const report = await providers.compatibility.evaluate(template, { costEstimate: estimate });
+    vi.spyOn(providers.compatibility, 'evaluate').mockResolvedValue(report);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <MyBuildsPage />
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByRole('article');
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    fireEvent.change(screen.getByLabelText('SORT BY'), { target: { value: 'cost' } });
+    expect(screen.getByText(/grouped by coverage, currency and period/)).toBeVisible();
+    expect(
+      screen.getAllByRole('article').map((card) => within(card).getByRole('heading').textContent),
+    ).toEqual(['Euro', 'US week', 'US smaller', 'US bigger', 'Partial', 'Unknown']);
+    const partial = screen.getByRole('heading', { name: 'Partial' }).closest('article');
+    expect(partial).toHaveTextContent('Partial · EUR · 60 days');
+    view.unmount();
+    client.clear();
   });
 });
 
