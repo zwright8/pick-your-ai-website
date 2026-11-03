@@ -10,7 +10,7 @@
  *  - coverage is `complete` only if nothing billable is left unpriced.
  */
 import type { BuildSnapshot, CatalogItem, CostEstimate, Pricebook, Selection } from '../contracts';
-import { addDecimals, decimalString, multiplyDecimals } from './decimal';
+import { addDecimals, formatScaled, multiplyDecimals } from './decimal';
 import { compareDateTimes } from './date-time';
 
 type Line = CostEstimate['line_items'][number];
@@ -26,9 +26,21 @@ interface Projection {
   assumptions: string[];
 }
 
-function trimDecimal(n: number): string {
-  // Usage projections are counts/ratios of integers; format to at most 6 places.
-  return decimalString(Number(n.toFixed(6)), 6).replace(/\.?0+$/, '') || '0';
+function projectDecimal(value: number, counts: readonly number[], divisor: bigint): string | null {
+  if (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) return null;
+  if (counts.some((count) => !Number.isSafeInteger(count) || count < 0)) return null;
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(String(value));
+  if (!match) return null;
+  const integer = match[1] ?? '0';
+  const fraction = match[2] ?? '';
+  const exponent = Number(match[3] ?? 0);
+  const shift = 12 + exponent - fraction.length;
+  if (shift < 0) return null;
+  let scaled = BigInt(integer + fraction) * 10n ** BigInt(shift);
+  for (const count of counts) scaled *= BigInt(count);
+  const rounded = (scaled + divisor / 2n) / divisor;
+  if (scaled !== 0n && rounded === 0n) return null;
+  return formatScaled(rounded, 12).replace(/\.?0+$/, '') || '0';
 }
 
 function project(
@@ -81,8 +93,10 @@ function project(
         const budget = settings.gpu_hours_budget;
         if (budget === undefined)
           return 'Set a GPU-hours budget on the training compute selection.';
+        const quantity = projectDecimal(budget, [], 1n);
+        if (quantity === null) return 'GPU usage exceeds the supported numeric precision.';
         return {
-          quantity: trimDecimal(budget),
+          quantity,
           assumptions: ['Training GPU hours equal the selected budget.'],
         };
       }
@@ -90,27 +104,40 @@ function project(
       // Both explicit and default hours are monthly before the period is prorated below.
       const hours = settings.reserved_hours_per_month ?? 24 * 30;
       const devices = typeof spec.accelerator_count === 'number' ? spec.accelerator_count : 1;
+      const quantity = projectDecimal(hours, [instances, devices, periodDays], 30n);
+      if (quantity === null) return 'GPU usage exceeds the supported numeric precision.';
       return {
-        quantity: trimDecimal(instances * devices * hours * (periodDays / 30)),
+        quantity,
         assumptions: [
           `${instances} instance(s) × ${devices} accelerator(s) × ${hours} h/month; always-on.`,
+          'Prorated usage is rounded half-up to 12 decimal places.',
         ],
       };
     }
     case 'cpu_hour': {
       const instances = settings.instances ?? 1;
       const hours = settings.reserved_hours_per_month ?? 24 * 30;
+      const quantity = projectDecimal(hours, [instances, periodDays], 30n);
+      if (quantity === null) return 'CPU usage exceeds the supported numeric precision.';
       return {
-        quantity: trimDecimal(instances * hours * (periodDays / 30)),
-        assumptions: ['Always-on instances.'],
+        quantity,
+        assumptions: [
+          'Always-on instances.',
+          'Prorated usage is rounded half-up to 12 decimal places.',
+        ],
       };
     }
     case 'storage_gb_month': {
       const gb = settings.provisioned_gb;
       if (gb === undefined) return 'Set provisioned GB on the storage selection.';
+      const quantity = projectDecimal(gb, [periodDays], 30n);
+      if (quantity === null) return 'Storage usage exceeds the supported numeric precision.';
       return {
-        quantity: trimDecimal(gb * (periodDays / 30)),
-        assumptions: [`${gb} GB provisioned for the period.`],
+        quantity,
+        assumptions: [
+          `${gb} GB provisioned for the period.`,
+          'Prorated usage is rounded half-up to 12 decimal places.',
+        ],
       };
     }
     default:

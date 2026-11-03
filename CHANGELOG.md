@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Preserve small and large compute and storage usage projections to contract precision, and leave unsupported precision unpriced.
 - Preserve exact request and token projections for large workload objectives, and leave unsafe imported integer inputs unpriced.
 - Leave conflicting or conditional preview price rates unpriced instead of adding unresolvable quotes together; ignore expired alternatives when a current rate for the same meter applies.
 - Improve light-theme contrast for unknown and partial values in the builder status strip.
