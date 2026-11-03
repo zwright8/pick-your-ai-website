@@ -1,4 +1,5 @@
 import { formatMoney } from '../../lib/item-cost';
+import { toScaled } from '../../domain/decimal';
 export { formatMoney, costShort, type CostShort } from '../../lib/item-cost';
 import type { BuildSnapshot, ComponentKind, CostEstimate, EvaluationReport } from '../../contracts';
 import { KIND_LABELS, withArticle } from '../../contracts';
@@ -59,7 +60,11 @@ export function overall(report: EvaluationReport | undefined): Outcome | null {
 export function costHeadline(cost: CostEstimate | undefined): { text: string; detail: string } {
   if (!cost) return { text: 'Unknown', detail: 'No estimate yet.' };
   const total = formatMoney(cost.total.amount, cost.currency);
-  if (cost.coverage === 'complete' && cost.line_items.length === 0) {
+  if (
+    cost.coverage === 'complete' &&
+    cost.line_items.length === 0 &&
+    toScaled(cost.total.amount) === 0n
+  ) {
     return {
       text: 'No metered costs',
       detail: 'No selected component has a usage-priced rate yet.',

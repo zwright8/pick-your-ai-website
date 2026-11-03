@@ -258,7 +258,7 @@ export function costShort(cost: CostEstimate | undefined): CostShort {
     };
   const total = formatMoney(cost.total.amount, cost.currency);
   if (cost.coverage === 'complete') {
-    if (cost.line_items.length === 0)
+    if (cost.line_items.length === 0 && toScaled(cost.total.amount) === 0n)
       return {
         text: 'No metered costs',
         qualifier: null,
