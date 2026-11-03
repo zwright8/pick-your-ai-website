@@ -11,7 +11,7 @@
  * reachable from their group header, so the table stays as short as the build actually is.
  */
 import '../../styles/dense.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate } from 'react-router';
 import type { BuildSnapshot, CatalogItem, ComponentKind, Selection, Tier } from '../../contracts';
 import { KIND_LABELS, kindDef, kindsInTier } from '../../contracts';
@@ -368,10 +368,25 @@ export default function BuilderPage() {
   const [jsonOpen, setJsonOpen] = useState(false);
   const [exportWarning, setExportWarning] = useState<ExportWarningData | null>(null);
   const exportRef = useRef<HTMLButtonElement>(null);
+  const [shareError, setShareError] = useState<{ message: string; attempt: number } | null>(null);
+  const [shareBuildId, setShareBuildId] = useState(build?.id);
+  const shareRef = useRef<HTMLButtonElement>(null);
+  const shareWarningRef = useRef<HTMLDivElement>(null);
+  const shareAttempt = useRef(0);
   const [objectivesMounted, setObjectivesMounted] = useState(false);
   const [objectivesDirty, setObjectivesDirty] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const nameTooLong = Array.from((name ?? '').trim()).length > MAX_BUILD_NAME_CODEPOINTS;
+  if (shareBuildId !== build?.id) {
+    setShareBuildId(build?.id);
+    setShareError(null);
+  }
+  useLayoutEffect(() => {
+    shareAttempt.current++;
+  }, [build?.id]);
+  useEffect(() => {
+    if (shareError) shareWarningRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [shareError]);
   const unappliedChanges = nameTooLong || objectivesDirty || settingsDirty;
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -491,24 +506,31 @@ export default function BuilderPage() {
   };
 
   const share = async () => {
+    const attempt = ++shareAttempt.current;
     // Encoding a draft the contract rejects throws, so validate first and say why.
     const problem = canExport(build);
     if (problem) {
-      toast(problem);
+      setShareError({ message: problem, attempt });
       return;
     }
     let url: string;
     try {
       url = `${location.origin}/shared#${encodeShareFragment(build, mode)}`;
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'This build cannot be encoded into a link.');
+      setShareError({
+        message: e instanceof Error ? e.message : 'This build cannot be encoded into a link.',
+        attempt,
+      });
       return;
     }
     try {
       await navigator.clipboard.writeText(url);
+      if (attempt !== shareAttempt.current) return;
+      setShareError(null);
       toast('Share link copied. The build travels in the link itself (after #).');
     } catch {
-      toast('Could not copy the link. Use Export instead.');
+      if (attempt !== shareAttempt.current) return;
+      setShareError({ message: 'Could not copy the link. Use Export instead.', attempt });
     }
   };
 
@@ -606,7 +628,7 @@ export default function BuilderPage() {
               <button type="button" className="pbtn" onClick={() => setJsonOpen(true)}>
                 <Icon name="code" /> View JSON
               </button>
-              <button type="button" className="pbtn" onClick={() => void share()}>
+              <button ref={shareRef} type="button" className="pbtn" onClick={() => void share()}>
                 <Icon name="copy" /> Copy share link
               </button>
               <button
@@ -620,6 +642,24 @@ export default function BuilderPage() {
             </>
           }
         />
+
+        {shareError ? (
+          <div ref={shareWarningRef} className="notice-error share-warning">
+            <p key={shareError.attempt} role="alert">
+              Share link was not copied. {shareError.message}
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline btn-small"
+              onClick={() => {
+                setShareError(null);
+                requestAnimationFrame(() => shareRef.current?.focus());
+              }}
+            >
+              Dismiss sharing warning
+            </button>
+          </div>
+        ) : null}
 
         {exportWarning ? (
           <ExportWarning

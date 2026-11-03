@@ -193,7 +193,7 @@ test('builder: a blank build explains why it cannot be shared', async ({ page })
   await page.getByRole('button', { name: /Copy share link/ }).click();
 
   // Encoding used to throw outside the try block, leaving no explanation.
-  await expect(page.locator('.toast')).toContainText(/Add at least 2 components before exporting/);
+  await expect(page.getByRole('alert')).toContainText(/Add at least 2 components before exporting/);
 });
 
 test('compare: keeps the lower-bound marker and cross-layer selections', async ({ page }, info) => {

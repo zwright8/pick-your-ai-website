@@ -241,7 +241,7 @@ describe('builder selection controls', () => {
     expect(apply).not.toHaveBeenCalled();
     expect(
       await screen.findByText(/Add at least 2 components before exporting/, {
-        selector: '[role="status"]',
+        selector: '[role="alert"]',
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Share link copied/)).toBeNull();

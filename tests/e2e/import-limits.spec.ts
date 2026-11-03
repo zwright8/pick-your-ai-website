@@ -186,7 +186,7 @@ test('a previously saved deep build can be backed up but not shared as an unusab
   await preview.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'Copy share link' }).click();
   await expect(
-    page.getByRole('status').filter({ hasText: 'nested too deeply to share' }),
+    page.getByRole('alert').filter({ hasText: 'nested too deeply to share' }),
   ).toBeVisible();
   const builderDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -401,7 +401,7 @@ test('a build larger than the link limit can be exported and imported on both sc
   });
   await page.reload();
   await page.getByRole('button', { name: 'Copy share link' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'too large to share' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'too large to share' })).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const download = await downloadPromise;
