@@ -50,8 +50,19 @@ function project(
       if (requests === undefined || per === undefined) {
         return 'Set requests per day and average tokens in the build objectives to project token usage.';
       }
+      if (
+        !Number.isSafeInteger(requests) ||
+        !Number.isSafeInteger(per) ||
+        !Number.isSafeInteger(periodDays)
+      ) {
+        return 'Workload projection requires safely representable whole-number inputs.';
+      }
+      // Multiply before converting millions so an intermediate product cannot lose integer precision.
+      const tokenCount = BigInt(requests) * BigInt(periodDays) * BigInt(per);
+      const millions = tokenCount / 1_000_000n;
+      const remainder = (tokenCount % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
       return {
-        quantity: trimDecimal((requests * periodDays * per) / 1_000_000),
+        quantity: `${millions}${remainder ? `.${remainder}` : ''}`,
         assumptions: [
           `${requests} requests/day × ${periodDays} days × ${per} ${meter === 'output_tokens_1m' ? 'output' : 'input'} tokens; no caching or retries modelled.`,
         ],
@@ -59,8 +70,10 @@ function project(
     }
     case 'request':
       if (requests === undefined) return 'Set requests per day to project request volume.';
+      if (!Number.isSafeInteger(requests) || !Number.isSafeInteger(periodDays))
+        return 'Workload projection requires safely representable whole-number inputs.';
       return {
-        quantity: String(requests * periodDays),
+        quantity: (BigInt(requests) * BigInt(periodDays)).toString(),
         assumptions: [`${requests} requests/day × ${periodDays} days.`],
       };
     case 'gpu_hour': {
