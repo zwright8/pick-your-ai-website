@@ -105,6 +105,60 @@ async function analysisHarness() {
 }
 
 describe('build analysis identity', () => {
+  it.each(['wrong build', 'wrong revision', 'wrong pricebook', 'mixed currency'] as const)(
+    'rejects %s cost evidence and shows an unavailable state',
+    async (problem) => {
+      const h = await analysisHarness();
+      const invalid = structuredClone(h.cost);
+      if (problem === 'wrong build') invalid.build_id = 'build.foreign';
+      if (problem === 'wrong revision') invalid.build_revision += 1;
+      if (problem === 'wrong pricebook') invalid.pricebook_id = 'pricebook.foreign';
+      if (problem === 'mixed currency') invalid.total.currency = 'EUR';
+      h.estimate.mockResolvedValue(invalid);
+      h.evaluate.mockClear();
+      await act(async () => {
+        await h.result.current.costQuery.refetch();
+      });
+      await waitFor(() => expect(h.result.current.costError).toBe(true));
+      expect(h.result.current.costIsCurrent).toBe(false);
+      await waitFor(() =>
+        expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+          costEstimate: null,
+          resourceEstimate: h.resources.status === 'available' ? h.resources.estimate : null,
+        }),
+      );
+      vi.mocked(useBuilder).mockReturnValue({
+        draft: createDraft(h.build),
+        ready: true,
+        catalogById: BY_ID,
+        lastChange: null,
+        saveState: { status: 'saved' },
+        apply: vi.fn(),
+        startNew: vi.fn(),
+        open: vi.fn(),
+        restore: vi.fn(),
+      });
+      const view = render(<BuildSummaryPage />, { wrapper: h.wrapper });
+      const cost = await screen.findByRole('region', { name: 'Cost breakdown' });
+      await waitFor(() => expect(cost).toHaveTextContent('Cost estimate unavailable'));
+      expect(cost).not.toHaveTextContent('Estimating cost');
+      if (problem === 'wrong pricebook') {
+        h.estimate.mockResolvedValue(h.cost);
+        h.evaluate.mockClear();
+        fireEvent.click(within(cost).getByRole('button', { name: 'Try again' }));
+        await waitFor(() => expect(cost).toHaveTextContent('$324.00'));
+        await waitFor(() =>
+          expect(h.evaluate).toHaveBeenCalledWith(h.build, {
+            costEstimate: h.cost,
+            resourceEstimate: h.resources.status === 'available' ? h.resources.estimate : null,
+          }),
+        );
+      }
+      view.unmount();
+      h.unmount();
+    },
+  );
+
   it('does not treat a failed cost refresh as current evidence', async () => {
     const h = await analysisHarness();
     h.estimate.mockRejectedValue(new Error('pricing unavailable'));

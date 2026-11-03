@@ -6,6 +6,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { BuildSnapshot, CatalogItem, ComponentKind } from '../contracts';
+import { estimateBuildCost } from '../data/cost-evidence';
 import { hasConsistentResourceUnits, hasKnownResourceSelections } from '../data/evidence-context';
 import { DataError } from '../data/errors';
 import { useData } from './data-context';
@@ -60,7 +61,10 @@ export function useBuildAnalysis(build: BuildSnapshot | null | undefined) {
   const enabled = Boolean(build);
   const cost = useQuery({
     queryKey: ['cost', ...buildKey(build)],
-    queryFn: () => data.pricing.estimate(build!),
+    queryFn: () => {
+      if (!build) throw new DataError('not_found', 'No build is available.');
+      return estimateBuildCost(data.pricing, build);
+    },
     enabled,
     placeholderData: keepPreviousData,
     retry: 1,

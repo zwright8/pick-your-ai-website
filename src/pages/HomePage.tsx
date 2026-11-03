@@ -180,9 +180,11 @@ function HeroPreview() {
         </div>
         <div className="preview-footer">
           <div>
-            <strong title={total.note}>
-              {total.text}
-              {total.qualifier ? <small> {total.qualifier}</small> : null}
+            <strong title={analysis.costQuery.isError ? 'Cost estimate unavailable.' : total.note}>
+              {analysis.costQuery.isError ? 'Unavailable' : total.text}
+              {!analysis.costQuery.isError && total.qualifier ? (
+                <small> {total.qualifier}</small>
+              ) : null}
             </strong>
             <small> Illustrative baseline</small>
           </div>

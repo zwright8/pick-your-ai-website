@@ -216,6 +216,7 @@ export function MiniBuild({
   required,
   outcome,
   cost,
+  costFailed = false,
   conflicts,
   unknown,
   incomplete,
@@ -225,6 +226,7 @@ export function MiniBuild({
   required: { done: number; total: number } | undefined;
   outcome: 'pass' | 'fail' | 'unknown' | 'none';
   cost: CostEstimate | undefined;
+  costFailed?: boolean;
   conflicts: number | undefined;
   unknown: number | undefined;
   /** Presence-only incompleteness (#294): a missing required pick is not an incompatibility. */
@@ -252,7 +254,9 @@ export function MiniBuild({
       </div>
       <div className="pbox-row total">
         <span>Est. {cost?.period_days ?? 30}-day cost</span>
-        <strong title={total.note}>{total.text}</strong>
+        <strong title={costFailed ? 'Cost estimate unavailable.' : total.note}>
+          {costFailed ? 'Unavailable' : total.text}
+        </strong>
       </div>
       {/*
         The status line grows from one line to three once an evaluation lands, which used to push the

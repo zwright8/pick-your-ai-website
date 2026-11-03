@@ -471,6 +471,7 @@ export function PartList({
                     : 'none'
             }
             cost={analysis.costIsCurrent ? analysis.cost : undefined}
+            costFailed={analysis.costQuery.isError}
             conflicts={report?.summary.failed}
             unknown={report?.summary.unknown}
             incomplete={incompleteBuild(build, report, ruleset.data) ?? undefined}

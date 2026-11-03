@@ -7,7 +7,7 @@ import { DEMO_PRICEBOOK } from '../../src/data/fixture/pricebook';
 import { estimateCost } from '../../src/domain/cost';
 import { apiChat, BY_ID, NOW } from './scenarios';
 
-function show(cost: CostEstimate, selected = 5) {
+function show(cost: CostEstimate, selected = 5, costFailed = false) {
   render(
     <MemoryRouter>
       <MiniBuild
@@ -18,6 +18,7 @@ function show(cost: CostEstimate, selected = 5) {
         conflicts={0}
         unknown={0}
         cost={cost}
+        costFailed={costFailed}
       />
     </MemoryRouter>,
   );
@@ -25,6 +26,12 @@ function show(cost: CostEstimate, selected = 5) {
 }
 
 describe('catalog total', () => {
+  it('reports a failed estimate instead of displaying stale cost data', () => {
+    const estimate = estimateCost(apiChat(), BY_ID, DEMO_PRICEBOOK, { now: NOW });
+    expect(show(estimate, 5, true)).toHaveTextContent('Unavailable');
+    expect(screen.queryByText('$324.00')).toBeNull();
+  });
+
   it('renders a large row price without losing decimal digits', () => {
     render(<Money amount="9007199254740993.12" currency="USD" />);
     expect(screen.getByText('$9,007,199,254,740,993.12')).toBeVisible();

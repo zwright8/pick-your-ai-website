@@ -52,6 +52,37 @@ const unpricedStack = () =>
   ]);
 
 describe('saved build cost coverage', () => {
+  it.each(['wrong pricebook', 'mixed currency'] as const)(
+    'does not show a saved estimate with %s',
+    async (problem) => {
+      mockBuilder(null);
+      const providers = createFixtureProviders({ now: () => NOW });
+      const build = apiChat();
+      await providers.builds.save(createDraft(build), null);
+      const invalid = structuredClone(await providers.pricing.estimate(build));
+      if (problem === 'wrong pricebook') invalid.pricebook_id = 'pricebook.foreign';
+      else invalid.total.currency = 'EUR';
+      vi.spyOn(providers.pricing, 'estimate').mockResolvedValue(invalid);
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+      const view = render(
+        <QueryClientProvider client={client}>
+          <DataContext.Provider value={providers}>
+            <MemoryRouter>
+              <ToastProvider>
+                <MyBuildsPage />
+              </ToastProvider>
+            </MemoryRouter>
+          </DataContext.Provider>
+        </QueryClientProvider>,
+      );
+      const card = await screen.findByRole('article');
+      await waitFor(() => expect(card).toHaveTextContent('Unavailable'));
+      expect(card).not.toHaveTextContent('$324.00');
+      view.unmount();
+      client.clear();
+    },
+  );
+
   it('does not present an unpriced build as $0/mo', async () => {
     mockBuilder(null);
     const providers = createFixtureProviders({ now: () => NOW });
@@ -146,6 +177,13 @@ describe('saved build cost coverage', () => {
         build_id: build.id,
         currency: example.currency,
         period_days: example.days,
+        subtotal: { ...estimate.subtotal, currency: example.currency },
+        tax: { ...estimate.tax, currency: example.currency },
+        line_items: estimate.line_items.map((line) => ({
+          ...line,
+          unit_price: { ...line.unit_price, currency: example.currency },
+          amount: { ...line.amount, currency: example.currency },
+        })),
         total: { amount: example.amount, currency: example.currency },
         coverage:
           build.id === 'build.partial'
@@ -182,6 +220,29 @@ describe('saved build cost coverage', () => {
 });
 
 describe('starter build cost coverage', () => {
+  it('shows unavailable instead of a foreign estimate on starter cards', async () => {
+    mockBuilder(apiChat());
+    const providers = createFixtureProviders({ now: () => NOW });
+    const foreign = { ...(await providers.pricing.estimate(apiChat())), build_id: 'build.foreign' };
+    vi.spyOn(providers.pricing, 'estimate').mockResolvedValue(foreign);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <DataContext.Provider value={providers}>
+          <MemoryRouter>
+            <ToastProvider>
+              <TemplatesPage />
+            </ToastProvider>
+          </MemoryRouter>
+        </DataContext.Provider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByText('Unavailable')).toHaveLength(4));
+    expect(screen.queryByText('$324.00')).toBeNull();
+    view.unmount();
+    client.clear();
+  });
+
   it('labels an incomplete starter estimate as a lower bound', async () => {
     mockBuilder(apiChat());
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });

@@ -384,7 +384,9 @@ describe('evaluation coverage and build comparison structure', () => {
 
   it('does not subtract a total whose currency conflicts with its estimate', async () => {
     show('/compare?revisions=1,2', false, false, undefined, ['1', '2'], true);
-    expect(await screen.findByText('Difference not computed:')).toBeVisible();
+    expect(
+      await screen.findByText('Cost estimate contains inconsistent currencies.'),
+    ).toBeVisible();
     expect(screen.queryByText('Difference (B − A):')).not.toBeInTheDocument();
   });
 

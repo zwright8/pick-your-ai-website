@@ -11,6 +11,7 @@ import type { BuildSnapshot, CatalogItem } from '../contracts';
 import { kindDef } from '../contracts';
 import { useBuilder } from '../app/builder-context';
 import { useData } from '../app/data-context';
+import { estimateBuildCost } from '../data/cost-evidence';
 import { useCatalog } from '../app/queries';
 import { STARTERS, type Starter } from '../data/fixture/starters';
 import { costShort } from '../features/builder/analysis';
@@ -52,7 +53,7 @@ function TemplateCard({ starter, index }: { starter: Starter; index: number }) {
   // The real preview estimator, not a hand-summed list of card prices.
   const cost = useQuery({
     queryKey: ['cost', build.id, build.revision, build],
-    queryFn: () => pricing.estimate(build),
+    queryFn: () => estimateBuildCost(pricing, build),
     staleTime: Infinity,
   });
   const nodes = layerNodes(build, catalog.byId);
@@ -61,7 +62,7 @@ function TemplateCard({ starter, index }: { starter: Starter; index: number }) {
    * starter leaves its vector database unpriced) is a lower bound, and an estimate that priced
    * nothing is Unknown — neither may read as a complete monthly total.
    */
-  const total = costShort(cost.data);
+  const total = costShort(cost.isError ? undefined : cost.data);
   const kicker = KICKERS[starter.id] ?? `${String(index + 1).padStart(2, '0')} / STARTER BUILD`;
 
   return (
@@ -87,8 +88,8 @@ function TemplateCard({ starter, index }: { starter: Starter; index: number }) {
         ))}
       </div>
       <div className="template-showcase-foot">
-        <span title={total.note}>
-          <strong>{total.text}</strong>
+        <span title={cost.isError ? 'Cost estimate unavailable.' : total.note}>
+          <strong>{cost.isError ? 'Unavailable' : total.text}</strong>
           {total.qualifier ? ` ${total.qualifier}` : ''} · illustrative
         </span>
         <button

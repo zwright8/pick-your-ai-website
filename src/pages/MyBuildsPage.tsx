@@ -22,6 +22,7 @@ import {
   importBuildFile,
 } from '../domain/share';
 import type { SavedBuildSummary } from '../data/types';
+import { estimateBuildCost } from '../data/cost-evidence';
 import { isDataError } from '../data/errors';
 import { useBuilder } from '../app/builder-context';
 import { useData } from '../app/data-context';
@@ -48,6 +49,7 @@ interface BuildDetail {
    * an all-unpriced build displayed as $0/mo and a partial total displayed as complete.
    */
   cost?: CostEstimate;
+  costFailed?: boolean;
   report?: EvaluationReport;
 }
 
@@ -129,10 +131,7 @@ export default function MyBuildsPage() {
         enabled: Boolean(build),
         queryFn: async () => {
           if (!build) throw new Error('Saved build is not available.');
-          const cost = await pricing.estimate(build);
-          if (cost.build_id !== build.id || cost.build_revision !== build.revision)
-            throw new Error('Cost estimate does not match the saved build.');
-          return cost;
+          return estimateBuildCost(pricing, build);
         },
       };
     }),
@@ -173,6 +172,7 @@ export default function MyBuildsPage() {
       const detail: BuildDetail = {
         build,
         cost: costQuery?.isError ? undefined : costQuery?.data,
+        costFailed: costQuery?.isError,
         report: costQuery?.isPending || reportQuery?.isError ? undefined : reportQuery?.data,
       };
       return [[summary.id, detail] as const];
@@ -432,9 +432,15 @@ export default function MyBuildsPage() {
                 selected
               </p>
               <div className="build-meta-row">
-                <span title={workingCost.note}>
-                  {workingCost.text}
-                  {workingCost.qualifier ? ` ${workingCost.qualifier}` : ''}
+                <span
+                  title={
+                    analysis.costQuery.isError ? 'Cost estimate unavailable.' : workingCost.note
+                  }
+                >
+                  {analysis.costQuery.isError ? 'Unavailable' : workingCost.text}
+                  {!analysis.costQuery.isError && workingCost.qualifier
+                    ? ` ${workingCost.qualifier}`
+                    : ''}
                 </span>
                 <span>
                   {workingSummary
@@ -696,9 +702,11 @@ function SavedCard({
           <div className="saved-card-metrics">
             <div>
               <small>ESTIMATED BASELINE*</small>
-              <strong title={cost.note}>
-                {cost.text}
-                {cost.qualifier ? <span className="pt-sub"> {cost.qualifier}</span> : null}
+              <strong title={detail?.costFailed ? 'Cost estimate unavailable.' : cost.note}>
+                {detail?.costFailed ? 'Unavailable' : cost.text}
+                {!detail?.costFailed && cost.qualifier ? (
+                  <span className="pt-sub"> {cost.qualifier}</span>
+                ) : null}
               </strong>
             </div>
             <div>

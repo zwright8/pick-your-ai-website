@@ -36,6 +36,7 @@ import { useData } from '../app/data-context';
 import { useCatalog, useCompatibleOptions, usePricebook } from '../app/queries';
 import { BILLING_LABELS, idToSlug, slugToId } from '../lib/catalog-view';
 import { formatExactMoney, itemPrice } from '../lib/item-cost';
+import { estimateBuildCost } from '../data/cost-evidence';
 import { uniqueOptionFor } from '../lib/compat';
 import { confirmVersionReplacement } from '../lib/selection-version';
 import { LAYERS, headlineKind, itemLogo, layerOf } from '../lib/layers';
@@ -823,7 +824,7 @@ function useSideAnalysis(build: BuildSnapshot) {
   });
   const cost = useQuery({
     queryKey: ['compare', 'cost', build.id, build.revision, build],
-    queryFn: () => pricing.estimate(build),
+    queryFn: () => estimateBuildCost(pricing, build),
   });
   return { evaluation, cost };
 }
